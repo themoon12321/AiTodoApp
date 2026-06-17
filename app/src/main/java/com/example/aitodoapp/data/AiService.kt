@@ -25,24 +25,20 @@ object AiService {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
     private val mediaType = "application/json".toMediaType()
 
-    fun processMessage(userMessage: String): AiResult {
+    fun processMessage(userMessage: String, currentTasks: List<String> = emptyList(), currentTags: List<String> = emptyList()): AiResult {
         val settings = SettingsRepository.load()
         if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key")
 
-        val body = buildJson {
-            put("model", settings.model)
-            put("messages", buildMessages(userMessage))
-            put("tools", buildTools())
-            put("tool_choice", "auto")
-        }
+        val taskList = currentTasks.joinToString("\n") { "- $it" }.ifEmpty { "（暂无任务）" }
+        val tagList = currentTags.joinToString("\n") { "- $it" }.ifEmpty { "（暂无标签）" }
 
-        val responseBody = httpPost(settings.apiUrl, settings.apiKey, body)
+        val requestJson = buildRequestJson(userMessage, taskList, tagList, settings.model)
+        val responseBody = httpPost(settings.apiUrl, settings.apiKey, requestJson)
             ?: return AiResult("网络请求失败，检查网络连接和 API 设置")
 
         return parseResponse(responseBody)
     }
 
-    /** 构建请求体 JSON 字符串 */
     private fun httpPost(url: String, apiKey: String, jsonBody: String): String? {
         return try {
             val response = client.newCall(Request.Builder().url(url)
@@ -53,69 +49,108 @@ object AiService {
         } catch (_: Exception) { null }
     }
 
-    // ======== JSON 构建 ========
+    // ======== JSON 构建（字符串拼接） ========
 
-    private fun buildMessages(userMessage: String): JsonArray = JsonArray(listOf(
-        JsonObject(mapOf("role" to JsonPrimitive("system"), "content" to JsonPrimitive("""
-你是 AI 代办助手。用户用自然语言告诉你做什么，你调用工具来操作。
+    private fun buildRequestJson(userMessage: String, taskList: String, tagList: String, model: String): String {
+        val systemPrompt = """
+你是 AI 代办助手。用户用自然语言告诉你做什么，你调用工具来操作。如果是询问任务列表等不需要操作的问题，直接文字回复即可。
+
+当前任务列表：
+$taskList
+
+现有标签：
+$tagList
+
+可用工具：
+- create_task：创建任务。参数 title(标题), priority(P0-P4), deadline(日期), tags(标签数组)
+- complete_task：标记任务已完成。参数 title(任务标题或关键词)
+- delete_task：删除任务。参数 title(任务标题或关键词)
+- update_task：修改任务。参数 title(要修改的任务关键词), new_title(新标题), priority(新优先级), deadline(新日期), tags(新标签)
 
 规则：
-- 用 create_task 创建任务，提取标题、优先级、截止日期、标签
-- 优先级默认 P3，"紧急/加急"→P0或P1
-- 截止日期：相对时间推算具体日期（今天${java.time.LocalDate.now()}）
-- 标签从内容推断，如"高数作业"→["高数","作业"]
-- 工具调用后，用中文告知用户结果
-""".trimIndent()))),
-        JsonObject(mapOf("role" to JsonPrimitive("user"), "content" to JsonPrimitive(userMessage)))
-    ))
+- 【标题精简】title 简短明确，不超过15字，提取核心内容
+- 【内容生成】content 字段给出任务的详细描述、做法建议、注意事项等（50-100字），如"交大物实验报告"→"先处理数据，再画图表，最后写结论。注意实验报告格式要求"
+- title 匹配时模糊匹配，如"实验"→"交大物实验报告"
+- 【计划日期】planned_dates 是用户打算在哪几天做。如"今明两天做"→[今天,明天]，不明确则留空
+- 【优先级多维度判断】综合考虑：
+  ① 时间紧迫度（40%）：今天/已过期→P0，明天→P1，3天内→P2，7天内→P3，更远→P4
+  ② 用户语气（20%）："紧急/加急/尽快/马上"+1~2级
+  ③ 任务性质（20%）：学业/考试类默认偏紧（P2），生活琐事偏松（P3-P4）
+  ④ 综合结果：默认P3，有DDL紧迫+P0~P2，语气急+提级
+- 截止日期："后天/下周一"等推算具体日期（今天${java.time.LocalDate.now()}）
+- 【标签策略】优先选现有标签，最多创建1-2个有分类价值的临时标签，不要为每个任务都创标签
+- 工具调用后用中文告知用户结果
+""".trimIndent()
 
-    private fun buildTools(): JsonArray = JsonArray(listOf(
-        JsonObject(mapOf(
-            "type" to JsonPrimitive("function"),
-            "function" to JsonObject(mapOf(
-                "name" to JsonPrimitive("create_task"),
-                "description" to JsonPrimitive("创建新任务，从用户自然语言中提取任务信息"),
-                "parameters" to JsonObject(mapOf(
-                    "type" to JsonPrimitive("object"),
-                    "properties" to JsonObject(mapOf(
-                        "title" to JsonObject(mapOf("type" to JsonPrimitive("string"), "description" to JsonPrimitive("任务标题"))),
-                        "priority" to JsonObject(mapOf("type" to JsonPrimitive("string"),
-                            "enum" to JsonArray(Priority.entries.map { JsonPrimitive(it.name) }),
-                            "description" to JsonPrimitive("优先级，默认P3"))),
-                        "deadline" to JsonObject(mapOf("type" to JsonPrimitive("string"), "description" to JsonPrimitive("截止日期 YYYY-MM-DD，用户说'后天''下周一'等时推算具体日期"))),
-                        "tags" to JsonObject(mapOf("type" to JsonPrimitive("array"), "items" to JsonObject(mapOf("type" to JsonPrimitive("string"))), "description" to JsonPrimitive("标签列表")))
-                    )),
-                    "required" to JsonArray(listOf(JsonPrimitive("title")))
-                ))
-            ))
-        ))
-    ))
+        val toolsJson = """
+[
+  {"type":"function","function":{"name":"create_task","description":"创建新任务","parameters":{"type":"object","properties":{"title":{"type":"string","description":"任务标题（不超过15字）"},"content":{"type":"string","description":"任务详细描述、做法建议、注意事项等（可选）"},"priority":{"type":"string","enum":["P0","P1","P2","P3","P4"],"description":"优先级"},"deadline":{"type":"string","description":"截止日期 YYYY-MM-DD"},"planned_dates":{"type":"array","items":{"type":"string"},"description":"计划在哪几天做，YYYY-MM-DD数组，如[\"2026-06-17\",\"2026-06-18\"]"},"tags":{"type":"array","items":{"type":"string"},"description":"标签"}},"required":["title"]}}},
+  {"type":"function","function":{"name":"complete_task","description":"标记任务已完成","parameters":{"type":"object","properties":{"title":{"type":"string","description":"任务标题或关键词"}},"required":["title"]}}},
+  {"type":"function","function":{"name":"delete_task","description":"删除任务","parameters":{"type":"object","properties":{"title":{"type":"string","description":"任务标题或关键词"}},"required":["title"]}}},
+  {"type":"function","function":{"name":"update_task","description":"修改任务的属性","parameters":{"type":"object","properties":{"title":{"type":"string","description":"要修改的任务标题或关键词"},"new_title":{"type":"string","description":"新标题"},"priority":{"type":"string","enum":["P0","P1","P2","P3","P4"],"description":"新优先级"},"deadline":{"type":"string","description":"新截止日期 YYYY-MM-DD"},"tags":{"type":"array","items":{"type":"string"},"description":"新标签"}},"required":["title"]}}}
+]
+""".trimIndent()
 
-    // ======== JSON 响应解析 ========
+        val escPrompt = escapeJson(systemPrompt)
+        val escUser = escapeJson(userMessage)
+
+        return """
+{"model":"$model","messages":[{"role":"system","content":"$escPrompt"},{"role":"user","content":"$escUser"}],"tools":$toolsJson,"tool_choice":"auto"}
+""".trimIndent()
+    }
+
+    private fun escapeJson(s: String): String {
+        val sb = StringBuilder()
+        for (c in s) {
+            when (c) {
+                '"' -> sb.append("\\\"")
+                '\\' -> sb.append("\\\\")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                else -> if (c.code < 0x20) { sb.append("\\u%04x".format(c.code)) } else { sb.append(c) }
+            }
+        }
+        return sb.toString()
+    }
+
+    // ======== 响应解析 ========
 
     private fun parseResponse(body: String): AiResult {
         return try {
             val root = json.parseToJsonElement(body).jsonObject
             val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: return AiResult("AI 返回为空")
             val message = choice["message"]?.jsonObject ?: return AiResult("无法解析 AI 响应")
-
             val content = message["content"]?.jsonPrimitive?.content
             val toolCalls = message["tool_calls"]?.jsonArray
-
             val actions = mutableListOf<AiAction>()
+
             if (toolCalls != null) {
                 for (tc in toolCalls) {
                     val func = tc.jsonObject["function"]?.jsonObject ?: continue
                     val name = func["name"]?.jsonPrimitive?.content ?: continue
                     val argsStr = func["arguments"]?.jsonPrimitive?.content ?: continue
-                    if (name == "create_task") {
-                        val args = json.parseToJsonElement(argsStr).jsonObject
-                        val title = (args["title"] as? JsonPrimitive)?.content ?: continue
-                        val priority = try { Priority.valueOf((args["priority"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { Priority.P3 }
-                        val deadline = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
-                        val tagArr = args["tags"] as? JsonArray
-                        val tags = tagArr?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
-                        actions.add(AiAction.CreateTask(title, priority, deadline, tags))
+                    val args = try { json.parseToJsonElement(argsStr).jsonObject } catch (_: Exception) { continue }
+                    when (name) {
+                        "create_task" -> {
+                            val t = (args["title"] as? JsonPrimitive)?.content ?: continue
+                            val c = (args["content"] as? JsonPrimitive)?.content ?: ""
+                            val p = try { Priority.valueOf((args["priority"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { Priority.P3 }
+                            val d = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+                            val pl = (args["planned_dates"] as? JsonArray)?.mapNotNull { try { java.time.LocalDate.parse((it as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null } } ?: emptyList()
+                            actions.add(AiAction.CreateTask(t, c, p, d, tags, pl))
+                        }
+                        "complete_task" -> (args["title"] as? JsonPrimitive)?.content?.let { actions.add(AiAction.CompleteTask(it)) }
+                        "delete_task" -> (args["title"] as? JsonPrimitive)?.content?.let { actions.add(AiAction.DeleteTask(it)) }
+                        "update_task" -> {
+                            val t = (args["title"] as? JsonPrimitive)?.content ?: continue
+                            val nt = (args["new_title"] as? JsonPrimitive)?.content
+                            val p = try { Priority.valueOf((args["priority"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            val d = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
+                            actions.add(AiAction.UpdateTask(t, nt, p, d, tags))
+                        }
                     }
                 }
             }
@@ -124,18 +159,10 @@ object AiService {
     }
 }
 
-// ======== 辅助：构建 JSON 对象 ========
-
-private fun buildJson(block: MutableMap<String, JsonElement>.() -> Unit): String {
-    val map = mutableMapOf<String, JsonElement>()
-    block(map)
-    return JsonObject(map).toString()
-}
-
-private fun MutableMap<String, JsonElement>.put(key: String, value: String) { this[key] = JsonPrimitive(value) }
-private fun MutableMap<String, JsonElement>.put(key: String, value: JsonElement) { this[key] = value }
-
 data class AiResult(val text: String, val actions: List<AiAction> = emptyList())
 sealed class AiAction {
-    data class CreateTask(val title: String, val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>) : AiAction()
+    data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList()) : AiAction()
+    data class CompleteTask(val title: String) : AiAction()
+    data class DeleteTask(val title: String) : AiAction()
+    data class UpdateTask(val title: String, val newTitle: String?, val priority: Priority?, val deadline: java.time.LocalDate?, val tags: List<String>?) : AiAction()
 }
