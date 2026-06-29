@@ -40,6 +40,8 @@ object SettingsRepository {
     data class Settings(
         val apiUrl: String = "https://api.deepseek.com/chat/completions",
         val apiKey: String = "",
-        val model: String = "deepseek-v4-flash"
+        val model: String = "deepseek-v4-flash",
+        val showOverdueInline: Boolean = true,
+        val longPressChat: Boolean = true
     )
 }

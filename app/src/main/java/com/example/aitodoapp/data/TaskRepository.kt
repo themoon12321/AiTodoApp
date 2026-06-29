@@ -22,23 +22,58 @@ object TaskRepository {
     inline fun <reified T> load(filename: String): List<T> {
         val dir = dataDir ?: return emptyList()
         val file = File(dir, filename)
-        if (!file.exists()) return emptyList()
+        val bakFile = File(dir, ".bak")
+        if (!file.exists()) {
+            // Primary file missing — try backup
+            if (bakFile.exists()) {
+                return try {
+                    val text = bakFile.readText()
+                    if (text.isBlank()) emptyList()
+                    else json.decodeFromString<List<T>>(text)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    emptyList()
+                }
+            }
+            return emptyList()
+        }
         return try {
             val text = file.readText()
             if (text.isBlank()) emptyList()
             else json.decodeFromString<List<T>>(text)
         } catch (e: Exception) {
             e.printStackTrace()
+            // Primary file corrupted — try backup
+            if (bakFile.exists()) {
+                return try {
+                    val text = bakFile.readText()
+                    if (text.isBlank()) emptyList()
+                    else json.decodeFromString<List<T>>(text)
+                } catch (e2: Exception) {
+                    e2.printStackTrace()
+                    emptyList()
+                }
+            }
             emptyList()
         }
     }
 
     inline fun <reified T> save(filename: String, data: List<T>) {
         val dir = dataDir ?: return
+        val file = File(dir, filename)
+        val bakFile = File(dir, ".bak")
         try {
-            File(dir, filename).writeText(json.encodeToString(data))
+            // Rename existing to backup before overwriting
+            if (file.exists()) {
+                bakFile.delete()
+                file.renameTo(bakFile)
+            }
+            file.writeText(json.encodeToString(data))
+            // Write succeeded, remove backup
+            bakFile.delete()
         } catch (e: Exception) {
             e.printStackTrace()
+            // Write failed — keep backup if it exists
         }
     }
 }

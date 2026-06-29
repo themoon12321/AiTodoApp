@@ -1,14 +1,21 @@
 package com.example.aitodoapp.data
 
 import com.example.aitodoapp.Priority
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,11 +56,18 @@ object AiService {
         } catch (_: Exception) { null }
     }
 
-    // ======== JSON 构建（字符串拼接） ========
+    // ======== JSON 构建 ========
 
     private fun buildRequestJson(userMessage: String, taskList: String, tagList: String, model: String): String {
+        val now = java.time.LocalDateTime.now()
+        val today = now.toLocalDate()
+        val dayNames = arrayOf("", "一", "二", "三", "四", "五", "六", "日")
+        val dayOfWeekChinese = dayNames[today.dayOfWeek.value]
+        val timeStr = "${now.hour.toString().padStart(2, '0')}:${now.minute.toString().padStart(2, '0')}"
         val systemPrompt = """
 你是 AI 代办助手。用户用自然语言告诉你做什么，你调用工具来操作。如果是询问任务列表等不需要操作的问题，直接文字回复即可。
+
+当前时间：${today}（${today.monthValue}月${today.dayOfMonth}日 星期$dayOfWeekChinese $timeStr）
 
 当前任务列表：
 $taskList
@@ -62,56 +76,127 @@ $taskList
 $tagList
 
 可用工具：
-- create_task：创建任务。参数 title(标题), priority(P0-P4), deadline(日期), tags(标签数组)
-- complete_task：标记任务已完成。参数 title(任务标题或关键词)
-- delete_task：删除任务。参数 title(任务标题或关键词)
-- update_task：修改任务。参数 title(要修改的任务关键词), new_title(新标题), priority(新优先级), deadline(新日期), tags(新标签)
+- create_task：创建任务。参数: title(标题), priority(P0-P4), deadline(日期), tags(标签数组), content(描述), planned_dates(计划日期)
+- complete_task：标记任务已完成。参数: title(任务标题或关键词)
+- delete_task：删除任务。参数: title(任务标题或关键词)
+- update_task：修改任务。参数: title(要修改的任务关键词), new_title(新标题), priority(新优先级), deadline(新日期), tags(新标签)
+- completed_tasks：查看所有已完成任务（无需参数）
 
 规则：
-- 【标题精简】title 简短明确，不超过15字，提取核心内容
-- 【内容生成】content 字段给出任务的详细描述、做法建议、注意事项等（50-100字），如"交大物实验报告"→"先处理数据，再画图表，最后写结论。注意实验报告格式要求"
+- 【工具选择】先判断用户意图再选工具。
+  ① 含"删/移除/去掉"→delete_task
+  ② 含"完成/做好了/搞定了/做完了"→complete_task
+  ③ 含"改/修改/换/移到"→update_task
+  ④ 用户询问完成了哪些任务/已完成的任务→completed_tasks
+  ⑤ 其他→create_task
+- 任务列表中标记了 [已完成] 的是已勾掉的任务，[过期] 的是已过期未完成的任务
+- 【标题精简】title 只保留任务核心名称，去掉时间词。如"明天下午开会"→"开会"，"后天交实验报告"→"交实验报告"
+- 【时间提取】从用户话中提取时间信息放到 planned_dates（计划时间）或 deadline（截止）中，不留在标题里。基于当前日期时间计算"今天/明天/后天/下周/上午/下午"等相对时间
+- 【内容生成】content 字段给出任务的详细描述、做法建议、注意事项等（20-100字）
 - title 匹配时模糊匹配，如"实验"→"交大物实验报告"
-- 【计划日期】planned_dates 是用户打算在哪几天做。如"今明两天做"→[今天,明天]，不明确则留空
-- 【优先级多维度判断】综合考虑：
-  ① 时间紧迫度（40%）：今天/已过期→P0，明天→P1，3天内→P2，7天内→P3，更远→P4
-  ② 用户语气（20%）："紧急/加急/尽快/马上"+1~2级
-  ③ 任务性质（20%）：学业/考试类默认偏紧（P2），生活琐事偏松（P3-P4）
-  ④ 综合结果：默认P3，有DDL紧迫+P0~P2，语气急+提级
-- 截止日期："后天/下周一"等推算具体日期（今天${java.time.LocalDate.now()}）
-- 【标签策略】优先选现有标签，最多创建1-2个有分类价值的临时标签，不要为每个任务都创标签
+- 【计划日期】planned_dates 是用户打算在哪几天做。如"今明两天做"→[今天,明天]
+- 【优先级多维度判断】综合考虑：时间紧迫度(40%)+用户语气(20%)+任务性质(20%)
+- 【标签策略】优先选现有标签，最多创建1-2个有分类价值的临时标签
+- 【不要反问】信息不全直接做，缺的字段不填，一次完成
 - 工具调用后用中文告知用户结果
 """.trimIndent()
 
-        val toolsJson = """
-[
-  {"type":"function","function":{"name":"create_task","description":"创建新任务","parameters":{"type":"object","properties":{"title":{"type":"string","description":"任务标题（不超过15字）"},"content":{"type":"string","description":"任务详细描述、做法建议、注意事项等（可选）"},"priority":{"type":"string","enum":["P0","P1","P2","P3","P4"],"description":"优先级"},"deadline":{"type":"string","description":"截止日期 YYYY-MM-DD"},"planned_dates":{"type":"array","items":{"type":"string"},"description":"计划在哪几天做，YYYY-MM-DD数组，如[\"2026-06-17\",\"2026-06-18\"]"},"tags":{"type":"array","items":{"type":"string"},"description":"标签"}},"required":["title"]}}},
-  {"type":"function","function":{"name":"complete_task","description":"标记任务已完成","parameters":{"type":"object","properties":{"title":{"type":"string","description":"任务标题或关键词"}},"required":["title"]}}},
-  {"type":"function","function":{"name":"delete_task","description":"删除任务","parameters":{"type":"object","properties":{"title":{"type":"string","description":"任务标题或关键词"}},"required":["title"]}}},
-  {"type":"function","function":{"name":"update_task","description":"修改任务的属性","parameters":{"type":"object","properties":{"title":{"type":"string","description":"要修改的任务标题或关键词"},"new_title":{"type":"string","description":"新标题"},"priority":{"type":"string","enum":["P0","P1","P2","P3","P4"],"description":"新优先级"},"deadline":{"type":"string","description":"新截止日期 YYYY-MM-DD"},"tags":{"type":"array","items":{"type":"string"},"description":"新标签"}},"required":["title"]}}}
-]
-""".trimIndent()
-
-        val escPrompt = escapeJson(systemPrompt)
-        val escUser = escapeJson(userMessage)
-
-        return """
-{"model":"$model","messages":[{"role":"system","content":"$escPrompt"},{"role":"user","content":"$escUser"}],"tools":$toolsJson,"tool_choice":"auto"}
-""".trimIndent()
-    }
-
-    private fun escapeJson(s: String): String {
-        val sb = StringBuilder()
-        for (c in s) {
-            when (c) {
-                '"' -> sb.append("\\\"")
-                '\\' -> sb.append("\\\\")
-                '\n' -> sb.append("\\n")
-                '\r' -> sb.append("\\r")
-                '\t' -> sb.append("\\t")
-                else -> if (c.code < 0x20) { sb.append("\\u%04x".format(c.code)) } else { sb.append(c) }
+        val toolsArray = buildJsonArray {
+            // create_task
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "create_task")
+                    put("description", "创建新任务")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("title") { put("type", "string"); put("description", "任务标题（不超过15字）") }
+                            putJsonObject("content") { put("type", "string"); put("description", "任务详细描述、做法建议、注意事项等（可选）") }
+                            putJsonObject("priority") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("P0")); add(JsonPrimitive("P1")); add(JsonPrimitive("P2")); add(JsonPrimitive("P3")); add(JsonPrimitive("P4")) }; put("description", "优先级") }
+                            putJsonObject("deadline") { put("type", "string"); put("description", "截止日期 YYYY-MM-DD") }
+                            putJsonObject("planned_dates") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "计划在哪几天做，YYYY-MM-DD数组") }
+                            putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "标签") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("title")) }
+                    }
+                }
+            }
+            // complete_task
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "complete_task")
+                    put("description", "标记任务已完成")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("title") { put("type", "string"); put("description", "任务标题或关键词") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("title")) }
+                    }
+                }
+            }
+            // delete_task
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "delete_task")
+                    put("description", "删除任务")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("title") { put("type", "string"); put("description", "任务标题或关键词") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("title")) }
+                    }
+                }
+            }
+            // update_task
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "update_task")
+                    put("description", "修改任务的属性")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("title") { put("type", "string"); put("description", "要修改的任务标题或关键词") }
+                            putJsonObject("new_title") { put("type", "string"); put("description", "新标题") }
+                            putJsonObject("priority") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("P0")); add(JsonPrimitive("P1")); add(JsonPrimitive("P2")); add(JsonPrimitive("P3")); add(JsonPrimitive("P4")) }; put("description", "新优先级") }
+                            putJsonObject("deadline") { put("type", "string"); put("description", "新截止日期 YYYY-MM-DD") }
+                            putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "新标签") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("title")) }
+                    }
+                }
+            }
+            // completed_tasks
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "completed_tasks")
+                    put("description", "查看所有已完成的任务")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {}
+                        putJsonArray("required") {}
+                    }
+                }
             }
         }
-        return sb.toString()
+
+        val requestBody = buildJsonObject {
+            put("model", model)
+            putJsonArray("messages") {
+                addJsonObject { put("role", "system"); put("content", systemPrompt) }
+                addJsonObject { put("role", "user"); put("content", userMessage) }
+            }
+            put("tools", toolsArray)
+            put("tool_choice", "auto")
+        }
+
+        return json.encodeToString(requestBody)
     }
 
     // ======== 响应解析 ========
@@ -151,6 +236,7 @@ $tagList
                             val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
                             actions.add(AiAction.UpdateTask(t, nt, p, d, tags))
                         }
+                        "completed_tasks" -> actions.add(AiAction.CompletedTasks)
                     }
                 }
             }
@@ -165,4 +251,5 @@ sealed class AiAction {
     data class CompleteTask(val title: String) : AiAction()
     data class DeleteTask(val title: String) : AiAction()
     data class UpdateTask(val title: String, val newTitle: String?, val priority: Priority?, val deadline: java.time.LocalDate?, val tags: List<String>?) : AiAction()
+    data object CompletedTasks : AiAction()
 }
