@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -57,9 +58,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.setValue
 import com.example.aitodoapp.data.AiService
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -67,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
@@ -133,7 +137,8 @@ data class Task(
     @Serializable(with = LocalDateListSerializer::class) val plannedDates: List<LocalDate> = emptyList(),
     @Serializable(with = LocalDateSerializer::class) val deadline: LocalDate? = null,
     val isCompleted: Boolean = false, val isArchived: Boolean = false,
-    @Serializable(with = LocalDateSerializer::class) val completedAt: LocalDate? = null
+    @Serializable(with = LocalDateSerializer::class) val completedAt: LocalDate? = null,
+    val calendarEventId: Long? = null
 )
 
 // ============ 主 Activity ============
@@ -143,6 +148,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         TaskRepository.init(applicationContext)
         SettingsRepository.init(applicationContext)
+        com.example.aitodoapp.data.TokenRepository.init(applicationContext)
         setContent { AiTodoAppTheme { AppMain() } }
     }
 }
@@ -157,6 +163,9 @@ fun AppMain() {
     var allTags by remember { mutableStateOf(TaskRepository.load<Tag>("tags.json")) }
     var loaded by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(SettingsRepository.load()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var calendarPermitted by remember { mutableStateOf(false) }
+    val calendarPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { calendarPermitted = it }
     LaunchedEffect(tab) { settings = SettingsRepository.load() }
     fun saveAll() { TaskRepository.save("tasks.json", tasks); TaskRepository.save("tags.json", allTags) }
 
@@ -205,21 +214,62 @@ fun AppMain() {
     }
 
     fun completeTask(id: String) {
-        tasks = tasks.map { if (it.id == id) { if (it.isCompleted) it.copy(isCompleted = false, completedAt = null) else it.copy(isCompleted = true, completedAt = today) } else it }
-            .let { it.filter { !it.isCompleted } + it.filter { it.isCompleted } }; saveAll()
+        val t = tasks.find { it.id == id }
+        val wasCompleted = t?.isCompleted == true
+        if (t != null && !t.isCompleted && t.calendarEventId != null) {
+            com.example.aitodoapp.data.CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
+        }
+        tasks = tasks.map { if (it.id == id) { if (it.isCompleted) it.copy(isCompleted = false, completedAt = null, calendarEventId = null) else it.copy(isCompleted = true, completedAt = today) } else it }
+            .let { it.filter { !it.isCompleted } + it.filter { it.isCompleted } }
+        if (wasCompleted && settings.autoSyncCalendar) {
+            val updated = tasks.find { it.id == id }
+            if (updated != null && (updated.deadline != null || updated.plannedDates.isNotEmpty())) {
+                val sd = updated.deadline ?: updated.plannedDates.first()
+                try {
+                    val eid = com.example.aitodoapp.data.CalendarSyncHelper.createEvent(context, updated.title, sd, settings.defaultReminderMinutes)
+                    if (eid != null) tasks = tasks.map { if (it.id == id) it.copy(calendarEventId = eid) else it }
+                } catch (_: Exception) {}
+            }
+        }
+        saveAll()
     }
-    fun deleteTask(id: String) { tasks = tasks.filter { it.id != id }; saveAll() }
+    fun deleteTask(id: String) {
+        val t = tasks.find { it.id == id }
+        if (t?.calendarEventId != null) com.example.aitodoapp.data.CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
+        tasks = tasks.filter { it.id != id }; saveAll()
+    }
     fun unarchiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = false, isCompleted = false) else it }; saveAll() }
     fun addTag(n: String): String { val t = n.trim(); if (t.isBlank() || allTags.any { it.name == t }) return t; allTags = allTags + Tag(t, true); saveAll(); return t }
     fun createTag(n: String) { val t = n.trim(); if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll() } }
     fun promoteTag(n: String) { allTags = allTags.map { if (it.name == n) it.copy(isTemporary = false) else it }; saveAll() }
     fun deleteTag(n: String) { allTags = allTags.filter { it.name != n }; tasks = tasks.map { it.copy(tags = it.tags.filter { t -> t != n }) }; saveAll() }
     fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList()) {
-        tags.forEach { addTag(it) }; tasks = listOf(Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned)) + tasks; saveAll()
+        tags.forEach { addTag(it) }
+        val newTask = Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned)
+        tasks = listOf(newTask) + tasks
+        if (settings.autoSyncCalendar && (dl != null || planned.isNotEmpty())) {
+            val syncDate = dl ?: planned.first()
+            try {
+                val eid = com.example.aitodoapp.data.CalendarSyncHelper.createEvent(context, title, syncDate, settings.defaultReminderMinutes)
+                if (eid != null) tasks = tasks.map { if (it.id == newTask.id) it.copy(calendarEventId = eid) else it }
+            } catch (_: Exception) {}
+        }
+        saveAll()
     }
 
     fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false) {
         tags.forEach { addTag(it) }
+        val old = tasks.find { it.id == id }
+        if (old?.deadline != dl) {
+            if (old?.calendarEventId != null) com.example.aitodoapp.data.CalendarSyncHelper.deleteEvent(context, old.calendarEventId!!)
+            if (settings.autoSyncCalendar && dl != null) {
+                try {
+                    val eid = com.example.aitodoapp.data.CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes)
+                    tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, plannedDates = planned, calendarEventId = eid) else it }
+                    saveAll(); return
+                } catch (_: Exception) {}
+            }
+        }
         tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, plannedDates = planned) else it }
         saveAll()
     }
@@ -244,10 +294,167 @@ fun AppMain() {
         }
     }) { innerPadding ->
         when (tab) {
-            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl -> addTask(t, p, d, tags, c, pl) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk -> updateTask(id, t, c, p, d, tags, pl, lk) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat)
+            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl -> addTask(t, p, d, tags, c, pl) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk -> updateTask(id, t, c, p, d, tags, pl, lk) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage)
             1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
             2 -> TagManagerScreen(allTags, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding))
+        }
+    }
+}
+
+// ============ 日历测试弹窗 ============
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CalendarTestDialog(onDismiss: () -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf(java.time.LocalDate.now()) }
+    var hour by remember { mutableStateOf(10) }
+    var minute by remember { mutableStateOf(0) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf("") }
+    var reminderMinutes by remember { mutableStateOf(-1) }
+    var deleteTitle by remember { mutableStateOf("") }
+    var deleteResult by remember { mutableStateOf("") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.all { it }) result = "✅ 权限已授予，请再次点击添加"
+        else result = "❌ 权限被拒绝"
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable { onDismiss() }.padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surface).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("测试日历写入", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(value = title, onValueChange = { title = it }, placeholder = { Text("日程标题") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { showDatePicker = true }, shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
+                    Text("📅 " + date.format(java.time.format.DateTimeFormatter.ofPattern("M月d日")), fontSize = 14.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { hour = (hour + 1) % 24 }, shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
+                    Text("🕐 ${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}", fontSize = 14.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                Text("分钟：", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onClick = { minute = (minute + 10) % 60 }, shape = RoundedCornerShape(8.dp)) { Text("+10", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { minute = (minute + 30) % 60 }, shape = RoundedCornerShape(8.dp)) { Text("+30", fontSize = 12.sp) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("提醒：", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val reminders = listOf(-1 to "无", 0 to "准时", 10 to "10分", 30 to "30分", 60 to "1小时")
+                reminders.forEach { (min, label) ->
+                    OutlinedButton(onClick = { reminderMinutes = min }, shape = RoundedCornerShape(8.dp),
+                        colors = if (reminderMinutes == min) androidx.compose.material3.ButtonDefaults.filledTonalButtonColors() else androidx.compose.material3.ButtonDefaults.outlinedButtonColors()) {
+                        Text(label, fontSize = 12.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = {
+                if (title.isBlank()) { result = "请输入标题"; return@Button }
+                val check = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_CALENDAR)
+                if (check != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    launcher.launch(arrayOf(android.Manifest.permission.READ_CALENDAR, android.Manifest.permission.WRITE_CALENDAR))
+                    return@Button
+                }
+                try {
+                    val projection = arrayOf("_id", "account_name", "calendar_displayName")
+                    var cursor = context.contentResolver.query(android.provider.CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
+                    var calendarId = -1L
+                    cursor?.use { while (it.moveToNext()) { calendarId = it.getLong(0); if (calendarId > 0) break } }
+                    if (calendarId <= 0) {
+                        // 直接尝试用常用日历 ID 写入用户事件
+                        val startMillis = date.atTime(java.time.LocalTime.of(hour, minute)).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        val endMillis = startMillis + 3600000
+                        for (id in 1L..5L) {
+                            val v = android.content.ContentValues().apply {
+                                put(android.provider.CalendarContract.Events.DTSTART, startMillis)
+                                put(android.provider.CalendarContract.Events.DTEND, endMillis)
+                                put(android.provider.CalendarContract.Events.TITLE, title.trim())
+                                put(android.provider.CalendarContract.Events.CALENDAR_ID, id)
+                                put(android.provider.CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
+                            }
+                            try {
+                                val uri = context.contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, v)
+                                if (uri != null) {
+                                    val eventId = uri.lastPathSegment?.toLong()
+                                    if (eventId != null && reminderMinutes >= 0) {
+                                        try {
+                                            val rem = android.content.ContentValues().apply {
+                                                put(android.provider.CalendarContract.Reminders.EVENT_ID, eventId)
+                                                put(android.provider.CalendarContract.Reminders.MINUTES, reminderMinutes)
+                                                put(android.provider.CalendarContract.Reminders.METHOD, android.provider.CalendarContract.Reminders.METHOD_ALERT)
+                                            }
+                                            context.contentResolver.insert(android.provider.CalendarContract.Reminders.CONTENT_URI, rem)
+                                        } catch (_: Exception) {}
+                                    }
+                                    result = "✅ 添加成功！已添加到系统日历"; return@Button
+                                }
+                            } catch (_: Exception) { continue }
+                        }
+                        result = "❌ 未找到可用日历（请先打开系统日历 App 初始化）"; return@Button
+                    }
+                    val startMillis = date.atTime(java.time.LocalTime.of(hour, minute)).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                    val endMillis = startMillis + 3600000
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.CalendarContract.Events.DTSTART, startMillis)
+                        put(android.provider.CalendarContract.Events.DTEND, endMillis)
+                        put(android.provider.CalendarContract.Events.TITLE, title.trim())
+                        put(android.provider.CalendarContract.Events.CALENDAR_ID, calendarId)
+                        put(android.provider.CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
+                    }
+                    val uri = context.contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, values)
+                    if (uri != null) {
+                        val eventId = uri.lastPathSegment?.toLong()
+                        if (eventId != null && reminderMinutes >= 0) {
+                            try {
+                                val rem = android.content.ContentValues().apply {
+                                    put(android.provider.CalendarContract.Reminders.EVENT_ID, eventId)
+                                    put(android.provider.CalendarContract.Reminders.MINUTES, reminderMinutes)
+                                    put(android.provider.CalendarContract.Reminders.METHOD, android.provider.CalendarContract.Reminders.METHOD_ALERT)
+                                }
+                                context.contentResolver.insert(android.provider.CalendarContract.Reminders.CONTENT_URI, rem)
+                            } catch (_: Exception) {}
+                        }
+                        result = "✅ 添加成功！已添加到系统日历"
+                    } else { result = "❌ 添加失败" }
+                } catch (e: Exception) { result = "❌ 出错了：${e.message}" }
+            }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("添加到日历") }
+            Spacer(Modifier.height(8.dp))
+            if (result.isNotEmpty()) Text(result, style = MaterialTheme.typography.labelMedium, color = if (result.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text("删除事件", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = deleteTitle, onValueChange = { deleteTitle = it }, placeholder = { Text("输入标题查找删除") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = {
+                if (deleteTitle.isBlank()) { deleteResult = "请输入标题"; return@Button }
+                deleteResult = ""
+                try {
+                    val cursor = context.contentResolver.query(android.provider.CalendarContract.Events.CONTENT_URI, arrayOf("_id", "title"), "title = ?", arrayOf(deleteTitle.trim()), null)
+                    var count = 0
+                    cursor?.use { while (it.moveToNext()) {
+                        val eventId = it.getLong(0)
+                        context.contentResolver.delete(android.provider.CalendarContract.Reminders.CONTENT_URI, "event_id = ?", arrayOf(eventId.toString()))
+                        context.contentResolver.delete(android.provider.CalendarContract.Events.CONTENT_URI, "_id = ?", arrayOf(eventId.toString()))
+                        count++
+                    } }
+                    deleteResult = if (count > 0) "✅ 已删除 $count 个事件" else "❌ 未找到匹配的事件"
+                } catch (e: Exception) { deleteResult = "❌ 出错了：${e.message}" }
+            }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), enabled = deleteTitle.isNotBlank()) { Text("删除匹配事件") }
+            if (deleteResult.isNotEmpty()) { Spacer(Modifier.height(4.dp)); Text(deleteResult, style = MaterialTheme.typography.labelMedium, color = if (deleteResult.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+        if (showDatePicker) {
+            val state = rememberDatePickerState(initialSelectedDateMillis = date.toEpochDay() * 86400000L)
+            DatePickerDialog(onDismissRequest = { showDatePicker = false }, confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { date = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }; showDatePicker = false }) { Text("确定") } }, dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("取消") } }) { DatePicker(state = state) }
         }
     }
 }
@@ -261,10 +468,23 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var apiKey by remember { mutableStateOf(s.value.apiKey) }
     var model by remember { mutableStateOf(s.value.model) }
     var saved by remember { mutableStateOf(false) }
+    var showCalendarTest by remember { mutableStateOf(false) }
+    var autoSync by remember { mutableStateOf(s.value.autoSyncCalendar) }
+    var defaultRemind by remember { mutableStateOf(s.value.defaultReminderMinutes) }
+    val settingsContext = androidx.compose.ui.platform.LocalContext.current
+    val calendarPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    Column(modifier.fillMaxSize().padding(20.dp)) {
-        Text("API 设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Column(modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState())) {
+        Text("设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
+
+        // ──── API 设置 ────
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(" API 设置 ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+        Spacer(Modifier.height(16.dp))
         Text("API 地址", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(value = apiUrl, onValueChange = { apiUrl = it; saved = false },
@@ -284,8 +504,14 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             placeholder = { Text("deepseek-v4-flash") }, singleLine = true,
             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
         Spacer(Modifier.height(24.dp))
-        Text("显示偏好", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
+
+        // ──── 显示偏好 ────
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(" 显示偏好 ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+        Spacer(Modifier.height(16.dp))
         var mergeOverdue by remember { mutableStateOf(s.value.showOverdueInline) }
         var longChat by remember { mutableStateOf(s.value.longPressChat) }
         Row(Modifier.fillMaxWidth().clickable { mergeOverdue = !mergeOverdue }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -303,9 +529,70 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             }
             Switch(checked = longChat, onCheckedChange = { longChat = it })
         }
+        Spacer(Modifier.height(12.dp))
+        var showToken by remember { mutableStateOf(s.value.showTokenUsage) }
+        Row(Modifier.fillMaxWidth().clickable { showToken = !showToken }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("显示 Token 用量", style = MaterialTheme.typography.bodyMedium)
+                Text("开启后在头部显示今日 AI 调用 Token 数", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = showToken, onCheckedChange = { showToken = it })
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().clickable { autoSync = !autoSync }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("自动同步日历", style = MaterialTheme.typography.bodyMedium)
+                Text("有截止日期的任务自动写入系统日历", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = autoSync, onCheckedChange = {
+                autoSync = it
+                if (it) {
+                    val check = androidx.core.content.ContextCompat.checkSelfPermission(settingsContext, android.Manifest.permission.WRITE_CALENDAR)
+                    if (check != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        calendarPermLauncher.launch(android.Manifest.permission.WRITE_CALENDAR)
+                    }
+                }
+            })
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("默认提醒时间", style = MaterialTheme.typography.bodyMedium)
+                Text("提前 ${defaultRemind} 分钟提醒", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            OutlinedButton(onClick = { defaultRemind = (defaultRemind + 5).coerceAtMost(120) }, shape = RoundedCornerShape(8.dp)) { Text("+5", fontSize = 12.sp) }
+            Spacer(Modifier.width(4.dp))
+            OutlinedButton(onClick = { defaultRemind = (defaultRemind - 5).coerceAtLeast(0) }, shape = RoundedCornerShape(8.dp)) { Text("-5", fontSize = 12.sp) }
+        }
         Spacer(Modifier.height(24.dp))
-        Button(onClick = { SettingsRepository.save(SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat)); saved = true },
+
+        // ──── 数据统计 ────
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(" 数据统计 ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+        Spacer(Modifier.height(12.dp))
+        val total = com.example.aitodoapp.data.TokenRepository.getTotalTokens()
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Column {
+                Text("总 Token 用量", style = MaterialTheme.typography.bodyMedium)
+                Text("输入 ${total.prompt} · 输出 ${total.completion} · 共 ${total.prompt + total.completion}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        // ──── 测试 ────
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(" 测试 ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = { showCalendarTest = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("测试日历写入") }
+        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = { SettingsRepository.save(SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind)); saved = true },
             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("保存") }
+        if (showCalendarTest) CalendarTestDialog(onDismiss = { showCalendarTest = false })
         if (saved) { Spacer(Modifier.height(8.dp)); Text("✓ 已保存", color = MaterialTheme.colorScheme.primary) }
     }
 }
@@ -314,8 +601,34 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true) {
-    val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; val scope = rememberCoroutineScope(); val chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false) {
+    val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // 使用 Activity 的 lifecycleScope，切后台时协程不被取消
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val scope = lifecycleOwner.lifecycleScope
+    val placeholders = remember { listOf("记个事...", "粘贴长文本或输入...", "告诉 AI 做什么...", "输入任务...", "试试自然语言...", "说你想做的事...") }
+    val currentPlaceholder by remember(chatMode) { mutableStateOf(if (chatMode) placeholders.random() else "") }
+    // AI 轮播状态消息
+    val aiStatusMessages = remember { listOf("🤔 思考中...", "🧠 分析中...", "📡 接收中...", "⚡ 处理中...", "🎯 定位中...", "✨ 优化中...", "🔍 检索中...", "💡 构思中...") }
+    LaunchedEffect(aiLoading) {
+        if (aiLoading) {
+            var i = 0
+            while (true) {
+                aiStatus = aiStatusMessages[i % aiStatusMessages.size]
+                kotlinx.coroutines.delay(2200)
+                i++
+            }
+        } else {
+            aiStatus = ""
+        }
+    }
+    // 完成消息 5 秒后自动消失
+    LaunchedEffect(aiDoneMessage) {
+        if (aiDoneMessage.isNotEmpty()) {
+            kotlinx.coroutines.delay(5000)
+            aiDoneMessage = ""
+        }
+    }
 
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -332,6 +645,26 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                     Text("今天要做的事", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     val dow = when (today.dayOfWeek.value) { 1 -> "星期一"; 2 -> "星期二"; 3 -> "星期三"; 4 -> "星期四"; 5 -> "星期五"; 6 -> "星期六"; 7 -> "星期日"; else -> "" }
                     Text(dow, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+                }
+                Spacer(Modifier.weight(1f))
+                if (showTokenUsage) {
+                    val todayTk = com.example.aitodoapp.data.TokenRepository.getTodayTokens()
+                    if (todayTk.prompt + todayTk.completion > 0) {
+                        Text("⬆${todayTk.prompt} ⬇${todayTk.completion}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f))
+                    }
+                }
+            }
+            // AI 处理进度 / 完成反馈（头部显示，退出聊天窗口也能看到）
+            if (aiLoading) {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer)) {
+                    androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primaryContainer)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(aiStatus, fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
+                    }
+                }
+            } else if (aiDoneMessage.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(aiDoneMessage, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
             }
             // 日期筛选芯片
@@ -394,18 +727,28 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
             LaunchedEffect(Unit) { chatFocus.requestFocus() }
             Box(Modifier.fillMaxSize().clickable { chatMode = false }.background(Color.Black.copy(alpha = 0.3f)))
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp)) {
-                Text(if (aiReply.isNotEmpty()) aiReply else "跟 AI 说你要做什么",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (aiReply.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+                    Text(if (aiReply.isNotEmpty()) aiReply else "跟 AI 说你要做什么",
+                        style = MaterialTheme.typography.labelMedium, softWrap = true,
+                        color = if (aiReply.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (aiLoading) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.weight(1f).height(3.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(aiStatus, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = chatInput, onValueChange = { chatInput = it }, placeholder = { Text(if (aiLoading) "处理中..." else "记个事...") }, singleLine = true, enabled = !aiLoading,
+                    OutlinedTextField(value = chatInput, onValueChange = { chatInput = it }, placeholder = { Text(if (aiLoading) "处理中..." else currentPlaceholder) }, textStyle = TextStyle(fontSize = 14.sp), singleLine = false, minLines = 1, maxLines = 5, enabled = !aiLoading,
                         modifier = Modifier.weight(1f).focusRequester(chatFocus), shape = RoundedCornerShape(12.dp))
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = {
                         val t = chatInput.trim()
                         if (t.isNotBlank() && !aiLoading) {
-                            aiLoading = true; aiReply = ""
+                            aiLoading = true; aiReply = ""; aiStatus = "🔄 正在连接 AI..."
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
@@ -418,20 +761,18 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                     }
                                     val tagNames = allTags.map { it.name }
                                     val result = AiService.processMessage(t, taskTitles, tagNames)
+                                    com.example.aitodoapp.data.TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                     scope.launch(Dispatchers.Main) {
                                         aiReply = result.text
-                                        aiLoading = false
-                                        result.actions.forEach { action ->
+                                        var created = 0; var completed = 0; var deleted = 0; var updated = 0
+                                        for (action in result.actions) {
                                             when (action) {
-                                                is com.example.aitodoapp.data.AiAction.CreateTask ->
-                                                    onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates)
-                                                is com.example.aitodoapp.data.AiAction.CompleteTask ->
-                                                    aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onComplete(it.id) }
-                                                is com.example.aitodoapp.data.AiAction.DeleteTask ->
-                                                    aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onDelete(it.id) }
+                                                is com.example.aitodoapp.data.AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates); created++ }
+                                                is com.example.aitodoapp.data.AiAction.CompleteTask -> { aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onComplete(it.id) }; completed++ }
+                                                is com.example.aitodoapp.data.AiAction.DeleteTask -> { aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onDelete(it.id) }; deleted++ }
                                                 is com.example.aitodoapp.data.AiAction.UpdateTask -> {
                                                     val task = aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }
-                                                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null)) {
+                                                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null)) {
                                                         onUpdateTask(
                                                             task.id,
                                                             action.newTitle ?: task.title,
@@ -439,9 +780,9 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                                             action.priority ?: task.priority,
                                                             action.deadline ?: task.deadline,
                                                             action.tags ?: task.tags,
-                                                            task.plannedDates,
+                                                            action.plannedDates ?: task.plannedDates,
                                                             action.priority != null && action.priority != task.priority
-                                                        )
+                                                        ); updated++
                                                     }
                                                 }
                                                 is com.example.aitodoapp.data.AiAction.CompletedTasks -> {
@@ -450,12 +791,22 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                                 }
                                             }
                                         }
+                                        val parts = mutableListOf<String>()
+                                        if (created > 0) parts.add("📝添加了${created}个任务")
+                                        if (completed > 0) parts.add("✅完成了${completed}个任务")
+                                        if (deleted > 0) parts.add("🗑️删除了${deleted}个任务")
+                                        if (updated > 0) parts.add("✏️修改了${updated}个任务")
+                                        if (parts.isNotEmpty()) aiDoneMessage = parts.joinToString(" ")
+                                        aiLoading = false; aiStatus = ""
                                         chatInput = ""
                                     }
+                                } catch (_: kotlinx.coroutines.CancellationException) {
+                                    // 切后台时协程被取消，不显示错误
+                                    aiLoading = false; aiStatus = ""
                                 } catch (e: Exception) {
                                     scope.launch(Dispatchers.Main) {
                                         aiReply = "出错了：${e.message}"
-                                        aiLoading = false
+                                        aiLoading = false; aiStatus = ""
                                     }
                                 }
                             }
@@ -524,7 +875,9 @@ fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String,
     var selectedTags by remember { mutableStateOf(listOf<String>()) }; var tagInput by remember { mutableStateOf("") }; var showTagSuggest by remember { mutableStateOf(false) }
     val suggestions = allTags.map { it.name }.filter { it !in selectedTags }
 
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable { onDismiss() })
+        Box(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surface).padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("新建任务", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
@@ -545,6 +898,17 @@ fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String,
             }
             if (showTagSuggest && tagInput.isNotBlank() && suggestions.isNotEmpty()) FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(4.dp)) {
                 suggestions.filter { it.contains(tagInput, ignoreCase = true) }.take(5).forEach { s -> Text("+ $s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 4.dp).clickable { selectedTags = selectedTags + s; tagInput = "" }) }
+            }
+            if (suggestions.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text("已有标签", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(4.dp)) {
+                    suggestions.take(12).forEach { s ->
+                        Text("#$s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 4.dp).clickable { selectedTags = selectedTags + s; tagInput = "" })
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(hasDeadline, { hasDeadline = it }); Spacer(Modifier.width(4.dp)); Text("设置截止日期") }
@@ -594,6 +958,7 @@ fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String,
             ) { DatePicker(state = planPickerState) }
         }
     }
+    }
 }
 
 // ============ 编辑任务弹窗 ============
@@ -634,6 +999,17 @@ fun EditTaskDialog(task: Task, allTags: List<Tag>, onDismiss: () -> Unit, onSave
             }
             if (showTagSuggest && tagInput.isNotBlank() && suggestions.isNotEmpty()) FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(4.dp)) {
                 suggestions.filter { it.contains(tagInput, true) }.take(5).forEach { Text("+ $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 4.dp).clickable { selectedTags = selectedTags + it; tagInput = "" }) }
+            }
+            if (suggestions.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text("已有标签", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(4.dp)) {
+                    suggestions.take(12).forEach { s ->
+                        Text("#$s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 4.dp).clickable { selectedTags = selectedTags + s; tagInput = "" })
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(hasDeadline, { hasDeadline = it }); Spacer(Modifier.width(4.dp)); Text("设置截止日期") }

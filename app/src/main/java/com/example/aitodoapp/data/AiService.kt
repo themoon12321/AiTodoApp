@@ -79,7 +79,7 @@ $tagList
 - create_task：创建任务。参数: title(标题), priority(P0-P4), deadline(日期), tags(标签数组), content(描述), planned_dates(计划日期)
 - complete_task：标记任务已完成。参数: title(任务标题或关键词)
 - delete_task：删除任务。参数: title(任务标题或关键词)
-- update_task：修改任务。参数: title(要修改的任务关键词), new_title(新标题), priority(新优先级), deadline(新日期), tags(新标签)
+- update_task：修改任务。参数: title(要修改的任务关键词), new_title(新标题), priority(新优先级), deadline(新日期), tags(新标签), planned_dates(新计划日期)
 - completed_tasks：查看所有已完成任务（无需参数）
 
 规则：
@@ -97,7 +97,7 @@ $tagList
 - 【计划日期】planned_dates 是用户打算在哪几天做。如"今明两天做"→[今天,明天]
 - 【优先级多维度判断】综合考虑：时间紧迫度(40%)+用户语气(20%)+任务性质(20%)
 - 【标签策略】优先选现有标签，最多创建1-2个有分类价值的临时标签
-- 【不要反问】信息不全直接做，缺的字段不填，一次完成
+- 【不要反问】信息不全直接做，缺的字段不填，一次完成。尤其是用户粘贴一段文字过来时，直接当做任务创建，不要问"是否需要添加"
 - 工具调用后用中文告知用户结果
 """.trimIndent()
 
@@ -166,6 +166,7 @@ $tagList
                             putJsonObject("priority") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("P0")); add(JsonPrimitive("P1")); add(JsonPrimitive("P2")); add(JsonPrimitive("P3")); add(JsonPrimitive("P4")) }; put("description", "新优先级") }
                             putJsonObject("deadline") { put("type", "string"); put("description", "新截止日期 YYYY-MM-DD") }
                             putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "新标签") }
+                            putJsonObject("planned_dates") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "新计划日期 YYYY-MM-DD 数组") }
                         }
                         putJsonArray("required") { add(JsonPrimitive("title")) }
                     }
@@ -234,22 +235,26 @@ $tagList
                             val p = try { Priority.valueOf((args["priority"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
                             val d = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
                             val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
-                            actions.add(AiAction.UpdateTask(t, nt, p, d, tags))
+                            val pl = (args["planned_dates"] as? JsonArray)?.mapNotNull { try { java.time.LocalDate.parse((it as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null } }
+                            actions.add(AiAction.UpdateTask(t, nt, p, d, tags, pl))
                         }
                         "completed_tasks" -> actions.add(AiAction.CompletedTasks)
                     }
                 }
             }
-            AiResult(text = content ?: "已完成", actions = actions)
+            val usage = root["usage"]?.jsonObject
+            val promptTokens = usage?.get("prompt_tokens")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            val completionTokens = usage?.get("completion_tokens")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            AiResult(text = content ?: "已完成", actions = actions, promptTokens = promptTokens, completionTokens = completionTokens)
         } catch (_: Exception) { AiResult("处理 AI 响应时出错") }
     }
 }
 
-data class AiResult(val text: String, val actions: List<AiAction> = emptyList())
+data class AiResult(val text: String, val actions: List<AiAction> = emptyList(), val promptTokens: Int = 0, val completionTokens: Int = 0)
 sealed class AiAction {
     data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList()) : AiAction()
     data class CompleteTask(val title: String) : AiAction()
     data class DeleteTask(val title: String) : AiAction()
-    data class UpdateTask(val title: String, val newTitle: String?, val priority: Priority?, val deadline: java.time.LocalDate?, val tags: List<String>?) : AiAction()
+    data class UpdateTask(val title: String, val newTitle: String?, val priority: Priority?, val deadline: java.time.LocalDate?, val tags: List<String>?, val plannedDates: List<java.time.LocalDate>? = null) : AiAction()
     data object CompletedTasks : AiAction()
 }

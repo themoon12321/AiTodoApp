@@ -42,6 +42,9 @@ object SettingsRepository {
         val apiKey: String = "",
         val model: String = "deepseek-v4-flash",
         val showOverdueInline: Boolean = true,
-        val longPressChat: Boolean = true
+        val longPressChat: Boolean = true,
+        val showTokenUsage: Boolean = false,
+        val autoSyncCalendar: Boolean = false,
+        val defaultReminderMinutes: Int = 30
     )
 }
