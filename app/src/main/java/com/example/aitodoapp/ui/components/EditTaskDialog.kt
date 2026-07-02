@@ -119,7 +119,7 @@ fun EditTaskDialog(
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("时间：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    Text("截止时间", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                     OutlinedTextField(value = deadlineTimeStr, onValueChange = { v ->
                         val clean = v.replace(":", "")
                         val formatted = if (clean.length == 4) "${clean.take(2)}:${clean.drop(2)}" else v
@@ -145,7 +145,7 @@ fun EditTaskDialog(
                 if (hasPlan && plannedDates.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("时间：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Text("计划时间", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                         OutlinedTextField(value = plannedTimeStr, onValueChange = { v ->
                             val clean = v.replace(":", "")
                             val formatted = if (clean.length == 4) "${clean.take(2)}:${clean.drop(2)}" else v
