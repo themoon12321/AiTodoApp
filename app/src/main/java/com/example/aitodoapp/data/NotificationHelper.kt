@@ -11,7 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.example.aitodoapp.MainActivity
 
 object NotificationHelper {
-    private const val CHANNEL_ID = "ai_todo_notify"
+    const val CHANNEL_ID = "ai_todo_notify"
     private const val CHANNEL_NAME = "AI 代办通知"
 
     fun createChannel(context: Context) {
