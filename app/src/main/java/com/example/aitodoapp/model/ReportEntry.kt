@@ -1,8 +1,10 @@
 package com.example.aitodoapp.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 import java.time.LocalDate
 
+@Immutable
 @Serializable
 data class ReportEntry(
     val content: String,

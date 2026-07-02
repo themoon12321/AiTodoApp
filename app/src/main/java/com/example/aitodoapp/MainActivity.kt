@@ -10,7 +10,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,9 +81,11 @@ enum class DayFilter {
     }
 }
 
+@Immutable
 @Serializable
 data class Tag(val name: String, val isTemporary: Boolean = true)
 
+@Immutable
 @Serializable
 data class Task(
     val id: String = UUID.randomUUID().toString().take(8),
@@ -330,9 +334,10 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
     }
 
     var selectedDay by remember { mutableStateOf(DayFilter.TODAY) }
-    val allActive = tasks.filter { !it.isArchived }
-    val overdueTasks = allActive.filter { !it.isCompleted && (it.deadline != null && it.deadline < today || it.plannedDates.isNotEmpty() && it.plannedDates.all { d -> d < today }) }
-    val activeTasks = when (selectedDay) {
+    val allActive = remember(tasks) { tasks.filter { !it.isArchived } }
+    val overdueTasks = remember(allActive) { allActive.filter { !it.isCompleted && (it.deadline != null && it.deadline < today || it.plannedDates.isNotEmpty() && it.plannedDates.all { d -> d < today }) } }
+    val activeTasks = remember(selectedDay, allActive) {
+    when (selectedDay) {
         DayFilter.OVERDUE -> allActive.filter { it.deadline != null && it.deadline < today && !it.isCompleted }
         DayFilter.ALL -> allActive
         DayFilter.TODAY -> allActive.filter {
@@ -340,8 +345,8 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
             todayRelevant || (it.isCompleted && it.completedAt == today)
         }
         else -> { val d = selectedDay.date(today) ?: today; allActive.filter { it.plannedDates.any { p -> p == d } || (it.plannedDates.isEmpty() && it.createdAt <= d && (it.deadline == null || it.deadline >= d)) } }
-    }
-    val archivedTasks = tasks.filter { it.isArchived }
+    } }
+    val archivedTasks = remember(tasks) { tasks.filter { it.isArchived } }
 
     Scaffold(bottomBar = {
         NavigationBar {
