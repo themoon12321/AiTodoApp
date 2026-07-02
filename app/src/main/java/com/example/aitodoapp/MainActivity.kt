@@ -335,7 +335,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
         saveAll()
     }
 
-    fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList()) {
+    fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList(), estimatedMinutes: Int? = null) {
         tags.forEach { addTag(it) }
         val old = tasks.find { it.id == id }
         if (old?.deadline != dl || old?.deadlineTime != deadlineTime) {
@@ -345,12 +345,12 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                     val eid = CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes,
                         time = deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
                         durationMinutes = tasks.find { it.id == id }?.estimatedMinutes ?: settings.defaultDurationMinutes)
-                    tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
+                    tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
                     saveAll(); return
                 } catch (_: Exception) {}
             }
         }
-        tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, plannedDates = planned, plannedTimes = plannedTimes) else it }
+        tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes) else it }
         saveAll()
     }
 
@@ -379,7 +379,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
         }
     }) { innerPadding ->
         when (tab) {
-            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt, em -> addTask(t, p, d, tags, c, pl, dt, em) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive, date -> if (archive) archiveTask(id, date) else unarchiveTask(id) }, openReportTrigger = openReportTrigger, onClearReportTrigger = onClearReportTrigger)
+            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt, em -> addTask(t, p, d, tags, c, pl, dt, em) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt, em -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt, em) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive, date -> if (archive) archiveTask(id, date) else unarchiveTask(id) }, openReportTrigger = openReportTrigger, onClearReportTrigger = onClearReportTrigger)
             1 -> ArchiveScreen(archivedTasks, ::unarchiveTask, ::deleteTask)
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->

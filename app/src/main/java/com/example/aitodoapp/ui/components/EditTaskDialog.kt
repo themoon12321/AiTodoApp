@@ -59,7 +59,7 @@ fun EditTaskDialog(
     task: Task,
     allTags: List<Tag>,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit,
+    onSave: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>, Int?) -> Unit,
     onDelete: () -> Unit
 ) {
     var title by remember { mutableStateOf(task.title) }; var content by remember { mutableStateOf(task.content) }
@@ -67,6 +67,7 @@ fun EditTaskDialog(
     var deadlineDate by remember { mutableStateOf(task.deadline ?: LocalDate.now()) }; var showPriorityMenu by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var deadlineTimeStr by remember { mutableStateOf(task.deadlineTime ?: "") }
+    var estimatedMinutesStr by remember { mutableStateOf(task.estimatedMinutes?.toString() ?: "") }
     var plannedTimeStr by remember { mutableStateOf(task.plannedTimes.firstOrNull() ?: "") }
     var pm by remember { mutableStateOf(if (task.plannedTimes.isNotEmpty()) task.plannedTimes.first().substringAfter(":").toIntOrNull() ?: 0 else 0) }
     var hasPlan by remember { mutableStateOf(task.plannedDates.isNotEmpty()) }
@@ -129,8 +130,15 @@ fun EditTaskDialog(
                         } else if (v.length <= 5) deadlineTimeStr = v
                     }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(100.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("HH:mm", fontSize = 14.sp) })
                 }
-            }
-            Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("任务时长", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = estimatedMinutesStr, onValueChange = { v ->
+                        if (v.all { it.isDigit() } && v.length <= 4) estimatedMinutesStr = v
+                        else if (v.isEmpty()) estimatedMinutesStr = ""
+                    }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(80.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("60", fontSize = 14.sp) })
+                    Text(" 分钟", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             // 计划日期
             Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(hasPlan, { hasPlan = it; if (!it) plannedDates = emptyList() }); Spacer(Modifier.width(4.dp)); Text("设计划时间") }
             if (hasPlan) {
@@ -160,7 +168,7 @@ fun EditTaskDialog(
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("取消") }
-                Button(onClick = { if (title.isNotBlank()) onSave(task.id, title.trim(), content.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, if (hasPlan) plannedDates else emptyList(), selectedPriority != task.priority, if (hasDeadline && deadlineTimeStr.matches(Regex("^\\d{2}:\\d{2}$"))) deadlineTimeStr else null, if (hasPlan && plannedDates.isNotEmpty() && plannedTimeStr.matches(Regex("^\\d{2}:\\d{2}$"))) listOf(plannedTimeStr) else emptyList()) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("保存") }
+                Button(onClick = { if (title.isNotBlank()) onSave(task.id, title.trim(), content.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, if (hasPlan) plannedDates else emptyList(), selectedPriority != task.priority, if (hasDeadline && deadlineTimeStr.matches(Regex("^\\d{2}:\\d{2}$"))) deadlineTimeStr else null, if (hasPlan && plannedDates.isNotEmpty() && plannedTimeStr.matches(Regex("^\\d{2}:\\d{2}$"))) listOf(plannedTimeStr) else emptyList(), estimatedMinutesStr.toIntOrNull()) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("保存") }
             }
             Spacer(Modifier.height(12.dp))
             if (deleteConfirm) { Text("确定要删除？", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium); Spacer(Modifier.height(4.dp))
@@ -191,5 +199,6 @@ fun EditTaskDialog(
             ) { DatePicker(state = planPickerState) }
         }
     }
-    }
+}
+}
 }
