@@ -79,7 +79,7 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?, Int?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean) -> Unit = { _, _ -> }, openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit = {}) {
+fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?, Int?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean, completedDate: LocalDate?) -> Unit = { _, _, _ -> }, openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit = {}) {
     val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var pendingRetryInput by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // 播报状态
     var showReportView by remember { mutableStateOf(false) }; var reportLoading by remember { mutableStateOf(false) }
@@ -111,8 +111,8 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                     SettingsRepository.save(upd); onUpdateSettings(upd); settingsChanged++
                 }
                 is AiAction.ManageTag -> { onTagAction(action.action, action.tagName); tagged++ }
-                is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true) }; archived++ }
-                is AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false) }; unarchived++ }
+                is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true, action.completedAt) }; archived++ }
+                is AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false, null) }; unarchived++ }
             }
         }
         val parts = mutableListOf<String>(); val details = mutableListOf<String>()

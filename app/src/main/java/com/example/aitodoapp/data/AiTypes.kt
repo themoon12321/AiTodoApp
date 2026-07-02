@@ -31,6 +31,6 @@ sealed class AiAction {
         val defaultReminderMinutes: Int? = null
     ) : AiAction()
     data class ManageTag(val action: String, val tagName: String) : AiAction()
-    data class ArchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
+    data class ArchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null, val completedAt: java.time.LocalDate? = null) : AiAction()
     data class UnarchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
 }

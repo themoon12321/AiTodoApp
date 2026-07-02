@@ -311,7 +311,9 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
         if (t?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
         tasks = tasks.map { if (it.id == id) it.copy(isDeleted = true, deletedAt = today) else it }; saveAll()
     }
-    fun archiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = true) else it }; saveAll() }
+    fun archiveTask(id: String, completedDate: LocalDate? = null) {
+        tasks = tasks.map { if (it.id == id) it.copy(isArchived = true, isCompleted = true, completedAt = completedDate ?: today) else it }; saveAll()
+    }
     fun unarchiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = false, isCompleted = false) else it }; saveAll() }
     fun addTag(n: String): String { val t = n.trim(); if (t.isBlank() || allTags.any { it.name == t }) return t; allTags = allTags + Tag(t, true); saveAll(); return t }
     fun createTag(n: String) { val t = n.trim(); if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll() } }
@@ -377,7 +379,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
         }
     }) { innerPadding ->
         when (tab) {
-            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt, em -> addTask(t, p, d, tags, c, pl, dt, em) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive -> if (archive) archiveTask(id) else unarchiveTask(id) }, openReportTrigger = openReportTrigger, onClearReportTrigger = onClearReportTrigger)
+            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt, em -> addTask(t, p, d, tags, c, pl, dt, em) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive, date -> if (archive) archiveTask(id, date) else unarchiveTask(id) }, openReportTrigger = openReportTrigger, onClearReportTrigger = onClearReportTrigger)
             1 -> ArchiveScreen(archivedTasks, ::unarchiveTask, ::deleteTask)
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->

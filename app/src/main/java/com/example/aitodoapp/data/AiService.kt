@@ -271,7 +271,7 @@ $tagList
                 put("type", "function")
                 putJsonObject("function") {
                     put("name", "archive_task")
-                    put("description", "归档任务。支持多字段精确定位")
+                    put("description", "归档任务。支持多字段精确定位，可指定归档日期")
                     putJsonObject("parameters") {
                         put("type", "object")
                         putJsonObject("properties") {
@@ -281,6 +281,7 @@ $tagList
                             putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "匹配的标签（可选）") }
                             putJsonObject("content") { put("type", "string"); put("description", "匹配的描述关键词（可选）") }
                             putJsonObject("planned_date") { put("type", "string"); put("description", "匹配的计划日期 YYYY-MM-DD（可选）") }
+                            putJsonObject("completed_at") { put("type", "string"); put("description", "归档日期 YYYY-MM-DD（可选，默认今天）") }
                         }
                         putJsonArray("required") { add(JsonPrimitive("title")) }
                     }
@@ -469,7 +470,8 @@ $tagList
                             val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
                             val ct = (args["content"] as? JsonPrimitive)?.content
                             val pd = try { java.time.LocalDate.parse((args["planned_date"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
-                            actions.add(AiAction.ArchiveTask(t, dl, dlt, tags, ct, pd))
+                            val ca = try { java.time.LocalDate.parse((args["completed_at"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            actions.add(AiAction.ArchiveTask(t, dl, dlt, tags, ct, pd, ca))
                         }
                         "unarchive_task" -> {
                             val t = (args["title"] as? JsonPrimitive)?.content ?: continue
