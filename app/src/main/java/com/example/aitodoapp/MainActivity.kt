@@ -26,6 +26,7 @@ import com.example.aitodoapp.data.CalendarSyncHelper
 import com.example.aitodoapp.data.LocalDateListSerializer
 import com.example.aitodoapp.data.LocalDateSerializer
 import com.example.aitodoapp.data.NotificationHelper
+import com.example.aitodoapp.data.ReportRepository
 import com.example.aitodoapp.data.SettingsRepository
 import com.example.aitodoapp.data.TaskRepository
 import com.example.aitodoapp.data.TokenRepository
@@ -161,6 +162,7 @@ class MainActivity : ComponentActivity() {
         TaskRepository.init(applicationContext)
         SettingsRepository.init(applicationContext)
         TokenRepository.init(applicationContext)
+        ReportRepository.init(applicationContext)
         NotificationHelper.createChannel(applicationContext)
         setContent { AiTodoAppTheme { AppMain() } }
     }

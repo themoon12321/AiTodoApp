@@ -62,14 +62,18 @@ import com.example.aitodoapp.formatTaskForAi
 import com.example.aitodoapp.data.AiAction
 import com.example.aitodoapp.data.AiService
 import com.example.aitodoapp.data.NotificationHelper
+import com.example.aitodoapp.data.ReportRepository
+import com.example.aitodoapp.model.ReportEntry
+import com.example.aitodoapp.ui.components.ReportBadge
+import java.time.LocalDate
 import com.example.aitodoapp.data.SettingsRepository
 import com.example.aitodoapp.data.TokenRepository
 import com.example.aitodoapp.data.toMatchCriteria
 import com.example.aitodoapp.ui.components.AddTaskDialog
 import com.example.aitodoapp.ui.components.EditTaskDialog
-import com.example.aitodoapp.ui.components.ReportCard
+import com.example.aitodoapp.ui.components.ReportBadge
 import com.example.aitodoapp.ui.components.TaskItem
-import java.time.LocalDate
+import com.example.aitodoapp.ui.screens.ReportViewScreen
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -77,7 +81,8 @@ import java.time.format.DateTimeFormatter
 fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean) -> Unit = { _, _ -> }) {
     val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var pendingRetryInput by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // 播报状态
-    var reportMorning by remember { mutableStateOf("") }; var reportEvening by remember { mutableStateOf("") }; var reportLoading by remember { mutableStateOf(false) }
+    var showReportView by remember { mutableStateOf(false) }; var reportLoading by remember { mutableStateOf(false) }
+    var reports by remember { mutableStateOf(ReportRepository.load()) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val scope = lifecycleOwner.lifecycleScope
@@ -213,6 +218,8 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                         Text("⬆${todayTk.prompt} ⬇${todayTk.completion}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f))
                     }
                 }
+                Spacer(Modifier.width(6.dp))
+                ReportBadge(hasUnread = reports.any { !it.isRead }, onClick = { showReportView = true })
             }
             // AI 处理进度 / 完成反馈
             if (aiLoading) {
@@ -227,13 +234,10 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                     Text(aiDoneMessage, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
             }
-            // 播报卡片（仅非归档模式显示）
-            if (!isArchive) {
-                ReportCard(
-                    reportText = reportMorning,
-                    isLoading = reportLoading,
-                    isMorning = true,
-                    onGenerate = {
+            // 播报生成按钮（非归档模式）
+            if (!isArchive && reports.isEmpty()) {
+                androidx.compose.material3.TextButton(
+                    onClick = {
                         reportLoading = true
                         val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
                         val taskDescs = aiTaskList.map { t ->
@@ -249,15 +253,22 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                             try {
                                 val result = AiService.generateDailyReport(taskDescs, tagNames, true)
                                 scope.launch(Dispatchers.Main) {
-                                    reportMorning = result.text
+                                    if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
+                                        val entry = ReportEntry(result.text, true, today.toString())
+                                        ReportRepository.addReport(entry)
+                                        NotificationHelper.show(context, "🌅 早间播报已送达", generateRandomNotification(true))
+                                        // 刷新
+                                        reports = ReportRepository.load()
+                                    }
                                     reportLoading = false
                                 }
                             } catch (_: Exception) {
                                 scope.launch(Dispatchers.Main) { reportLoading = false }
                             }
                         }
-                    }
-                )
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                ) { Text(if (reportLoading) "⏳ 生成中..." else "🌅 生成早间播报", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary) }
             }
             // 日期筛选芯片
             if (!isArchive) {
@@ -396,5 +407,35 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
         }
         if (showInput) AddTaskDialog(allTags, { showInput = false }) { t, p, d, tags, c, pl, dt -> onAddTask(t, p, d, tags, c, pl, dt); showInput = false }
         if (editTarget != null) EditTaskDialog(editTarget!!, allTags, { editTarget = null }, { id, ti, c, p, d, tags, pl, locked, dt, pt -> onUpdateTask(id, ti, c, p, d, tags, pl, locked, dt, pt); editTarget = null }, { onDelete(editTarget!!.id); editTarget = null })
+        // 播报查看页
+        if (showReportView) {
+            val allReports = ReportRepository.load()
+            ReportViewScreen(reports = allReports, onDismiss = {
+                ReportRepository.markRead()
+                reports = ReportRepository.load()
+                showReportView = false
+            })
+        }
     }
+}
+
+/** 随机生成通知文案 */
+private fun generateRandomNotification(isMorning: Boolean): String {
+    val prefix = if (isMorning) "🌅" else "🌙"
+    val morningTexts = listOf(
+        "你的早间播报已送达，今天也要元气满满哦 ☀️",
+        "早安！来看看今天有哪些待办等着你～",
+        "☀️ 新的一天，播报已更新，快来看看今天的安排吧！",
+        "早上好～今日待办清单已生成，查看详情 👀",
+        "🌅 播报已送达！今天也要高效完成任务，冲鸭！",
+    )
+    val eveningTexts = listOf(
+        "🌙 晚间播报来了～回顾一下今天的完成情况吧！",
+        "晚安～今天的播报已生成，看看明天要做什么 ✨",
+        "🌃 晚间播报已更新，来看看今天的成果！",
+        "今天的努力辛苦啦，来看看晚间总结 💪",
+        "✨ 播报已送达！规划明天，从今晚开始～",
+    )
+    val texts = if (isMorning) morningTexts else eveningTexts
+    return "$prefix ${texts.random()}"
 }
