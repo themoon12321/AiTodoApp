@@ -57,6 +57,7 @@ object SettingsRepository {
         val showTokenUsage: Boolean = false,
         val autoSyncCalendar: Boolean = false,
         val defaultReminderMinutes: Int = 30,
+        val defaultDurationMinutes: Int = 60,
         val reportEnabled: Boolean = false,
         val morningReportTime: String = "07:00",
         val eveningReportTime: String = "21:00"

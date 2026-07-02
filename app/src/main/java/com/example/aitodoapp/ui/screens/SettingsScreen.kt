@@ -269,7 +269,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
         Button(onClick = {
-            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)
+            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, s.value.defaultDurationMinutes, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)
             SettingsRepository.save(newSettings)
             if (reportEnabled && onScheduleDaily != null) {
                 val mh = s.value.morningReportTime.substringBefore(":").toIntOrNull() ?: 7

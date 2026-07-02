@@ -4,12 +4,14 @@ import android.content.ContentValues
 import android.content.Context
 import android.provider.CalendarContract
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 
 object CalendarSyncHelper {
 
     private var cachedCalendarId = -1L
-    private val utcZone = ZoneId.of("UTC")
+    private val systemZone = ZoneId.systemDefault()
 
     private fun getCalendarId(context: Context): Long {
         if (cachedCalendarId > 0) return cachedCalendarId
@@ -33,15 +35,16 @@ object CalendarSyncHelper {
         } catch (_: Exception) {}
     }
 
-    private fun insertEvent(context: Context, title: String, date: LocalDate, calId: Long, reminderMinutes: Int): Long? {
-        val startMillis = date.atStartOfDay(utcZone).toInstant().toEpochMilli()
+    /** 创建全天事件（无具体时间时使用） */
+    private fun insertAllDayEvent(context: Context, title: String, date: LocalDate, calId: Long, reminderMinutes: Int): Long? {
+        val startMillis = date.atStartOfDay(systemZone).toInstant().toEpochMilli()
         val endMillis = startMillis + 86400000L
         val values = ContentValues().apply {
             put(CalendarContract.Events.DTSTART, startMillis)
             put(CalendarContract.Events.DTEND, endMillis)
             put(CalendarContract.Events.TITLE, title)
             put(CalendarContract.Events.CALENDAR_ID, calId)
-            put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+            put(CalendarContract.Events.EVENT_TIMEZONE, systemZone.id)
             put(CalendarContract.Events.ALL_DAY, 1)
         }
         val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) ?: return null
@@ -50,15 +53,40 @@ object CalendarSyncHelper {
         return eventId
     }
 
-    fun createEvent(context: Context, title: String, date: LocalDate, reminderMinutes: Int = 30): Long? {
+    /** 创建计时事件（指定开始时间和持续分钟） */
+    private fun insertTimedEvent(context: Context, title: String, date: LocalDate, time: LocalTime, durationMinutes: Int, calId: Long, reminderMinutes: Int): Long? {
+        val startDateTime = ZonedDateTime.of(date, time, systemZone)
+        val endDateTime = startDateTime.plusMinutes(durationMinutes.toLong())
+        val startMillis = startDateTime.toInstant().toEpochMilli()
+        val endMillis = endDateTime.toInstant().toEpochMilli()
+        val values = ContentValues().apply {
+            put(CalendarContract.Events.DTSTART, startMillis)
+            put(CalendarContract.Events.DTEND, endMillis)
+            put(CalendarContract.Events.TITLE, title)
+            put(CalendarContract.Events.CALENDAR_ID, calId)
+            put(CalendarContract.Events.EVENT_TIMEZONE, systemZone.id)
+        }
+        val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) ?: return null
+        val eventId = uri.lastPathSegment?.toLong() ?: return null
+        if (reminderMinutes >= 0) addReminder(context, eventId, reminderMinutes)
+        return eventId
+    }
+
+    /** 创建日历事件。有时段则创建计时事件，否则全天事件 */
+    fun createEvent(context: Context, title: String, date: LocalDate, reminderMinutes: Int = 30, time: LocalTime? = null, durationMinutes: Int = 60): Long? {
         var calId = getCalendarId(context)
         if (calId > 0) {
-            try { val eid = insertEvent(context, title, date, calId, reminderMinutes); if (eid != null) return eid } catch (_: Exception) {}
-            cachedCalendarId = -1  // 缓存 ID 失效，清除后走 fallback
+            try {
+                val eid = if (time != null) insertTimedEvent(context, title, date, time, durationMinutes, calId, reminderMinutes)
+                          else insertAllDayEvent(context, title, date, calId, reminderMinutes)
+                if (eid != null) return eid
+            } catch (_: Exception) {}
+            cachedCalendarId = -1
         }
         for (id in 1L..5L) {
             try {
-                val eid = insertEvent(context, title, date, id, reminderMinutes)
+                val eid = if (time != null) insertTimedEvent(context, title, date, time, durationMinutes, id, reminderMinutes)
+                          else insertAllDayEvent(context, title, date, id, reminderMinutes)
                 if (eid != null) { cachedCalendarId = id; return eid }
             } catch (_: Exception) { continue }
         }

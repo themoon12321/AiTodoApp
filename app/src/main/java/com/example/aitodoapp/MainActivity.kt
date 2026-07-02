@@ -104,6 +104,7 @@ data class Task(
     val isDeleted: Boolean = false,
     @Serializable(with = LocalDateSerializer::class) val deletedAt: LocalDate? = null,
     @Serializable(with = LocalDateSerializer::class) val completedAt: LocalDate? = null,
+    val estimatedMinutes: Int? = null,
     val calendarEventId: Long? = null
 )
 
@@ -263,7 +264,9 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                         val syncDate = task.deadline ?: task.plannedDates.first()
                         try {
                             val eid = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                CalendarSyncHelper.createEvent(context, task.title, syncDate, settings.defaultReminderMinutes)
+                                CalendarSyncHelper.createEvent(context, task.title, syncDate, settings.defaultReminderMinutes,
+                                    time = task.deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
+                                    durationMinutes = task.estimatedMinutes ?: settings.defaultDurationMinutes)
                             }
                             if (eid != null) { tasks = tasks.map { if (it.id == task.id) it.copy(calendarEventId = eid) else it }; synced = true }
                         } catch (_: Exception) {}
@@ -294,7 +297,9 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
             if (updated != null && (updated.deadline != null || updated.plannedDates.isNotEmpty())) {
                 val sd = updated.deadline ?: updated.plannedDates.first()
                 try {
-                    val eid = CalendarSyncHelper.createEvent(context, updated.title, sd, settings.defaultReminderMinutes)
+                    val eid = CalendarSyncHelper.createEvent(context, updated.title, sd, settings.defaultReminderMinutes,
+                        time = updated.deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
+                        durationMinutes = updated.estimatedMinutes ?: settings.defaultDurationMinutes)
                     if (eid != null) tasks = tasks.map { if (it.id == id) it.copy(calendarEventId = eid) else it }
                 } catch (_: Exception) {}
             }
@@ -312,14 +317,16 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
     fun createTag(n: String) { val t = n.trim(); if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll() } }
     fun promoteTag(n: String) { allTags = allTags.map { if (it.name == n) it.copy(isTemporary = false) else it }; saveAll() }
     fun deleteTag(n: String) { allTags = allTags.filter { it.name != n }; tasks = tasks.map { it.copy(tags = it.tags.filter { t -> t != n }) }; saveAll() }
-    fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList(), deadlineTime: String? = null) {
+    fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList(), deadlineTime: String? = null, estimatedMinutes: Int? = null) {
         tags.forEach { addTag(it) }
-        val newTask = Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned, deadlineTime = deadlineTime)
+        val newTask = Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes)
         tasks = listOf(newTask) + tasks
         if (settings.autoSyncCalendar && (dl != null || planned.isNotEmpty())) {
             val syncDate = dl ?: planned.first()
             try {
-                val eid = CalendarSyncHelper.createEvent(context, title, syncDate, settings.defaultReminderMinutes)
+                val eid = CalendarSyncHelper.createEvent(context, title, syncDate, settings.defaultReminderMinutes,
+                    time = newTask.deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
+                    durationMinutes = settings.defaultDurationMinutes)
                 if (eid != null) tasks = tasks.map { if (it.id == newTask.id) it.copy(calendarEventId = eid) else it }
             } catch (_: Exception) {}
         }
@@ -333,7 +340,9 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
             if (old?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, old.calendarEventId!!)
             if (settings.autoSyncCalendar && dl != null) {
                 try {
-                    val eid = CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes)
+                    val eid = CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes,
+                        time = deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
+                        durationMinutes = settings.defaultDurationMinutes)
                     tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
                     saveAll(); return
                 } catch (_: Exception) {}

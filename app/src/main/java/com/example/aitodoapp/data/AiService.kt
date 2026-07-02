@@ -137,7 +137,8 @@ $tagList
                             putJsonObject("content") { put("type", "string"); put("description", "任务详细描述、做法建议、注意事项等（可选）") }
                             putJsonObject("priority") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("P0")); add(JsonPrimitive("P1")); add(JsonPrimitive("P2")); add(JsonPrimitive("P3")); add(JsonPrimitive("P4")) }; put("description", "优先级") }
                             putJsonObject("deadline") { put("type", "string"); put("description", "截止日期 YYYY-MM-DD") }
-                            putJsonObject("deadline_time") { put("type", "string"); put("description", "截止时间 HH:mm（可选）") }
+                            putJsonObject("deadline_time") { put("type", "string"); put("description", "截止时间 HH:mm（可选，根据语义推断：上午→09:00、中午→11:00、下午→14:00、晚上→18:00）") }
+                            putJsonObject("estimated_minutes") { put("type", "integer"); put("description", "预估耗时分钟（可选，AI根据任务内容估算：写实验报告120、买菜30、开会60）") }
                             putJsonObject("planned_dates") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "计划在哪几天做，YYYY-MM-DD数组") }
                             putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "标签") }
                         }
@@ -405,9 +406,10 @@ $tagList
                             val p = try { Priority.valueOf((args["priority"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { Priority.P3 }
                             val d = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
                             val dt = (args["deadline_time"] as? JsonPrimitive)?.content
+                            val em = (args["estimated_minutes"] as? JsonPrimitive)?.content?.toIntOrNull()
                             val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
                             val pl = (args["planned_dates"] as? JsonArray)?.mapNotNull { try { java.time.LocalDate.parse((it as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null } } ?: emptyList()
-                            actions.add(AiAction.CreateTask(t, c, p, d, tags, pl, dt))
+                            actions.add(AiAction.CreateTask(t, c, p, d, tags, pl, dt, em))
                         }
                         "complete_task" -> {
                             val t = (args["title"] as? JsonPrimitive)?.content ?: continue
