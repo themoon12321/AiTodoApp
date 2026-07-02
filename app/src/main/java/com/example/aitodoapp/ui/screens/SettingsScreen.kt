@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -165,27 +166,31 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("早间播报", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeAddHour(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+1h", fontSize = 12.sp) }
-                Spacer(Modifier.width(4.dp))
-                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeSubHour(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-1h", fontSize = 12.sp) }
-                Spacer(Modifier.width(4.dp))
-                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeAddMin(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+5m", fontSize = 12.sp) }
-                Spacer(Modifier.width(4.dp))
-                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeSubMin(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-5m", fontSize = 12.sp) }
-                Spacer(Modifier.width(8.dp))
-                Text(s.value.morningReportTime, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(value = s.value.morningReportTime, onValueChange = { v ->
+                    val clean = v.replace(":", "")
+                    val formatted = if (clean.length == 4) "${clean.take(2)}:${clean.drop(2)}" else v
+                    if (formatted.matches(Regex("^\\d{2}:\\d{2}$"))) {
+                        val h = formatted.take(2).toIntOrNull() ?: return@OutlinedTextField
+                        val m = formatted.drop(3).toIntOrNull() ?: return@OutlinedTextField
+                        if (h in 0..23 && m in 0..59) s.value = s.value.copy(morningReportTime = formatted)
+                    } else if (v.length <= 5) {
+                        s.value = s.value.copy(morningReportTime = v)
+                    }
+                }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(100.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("07:00", fontSize = 14.sp) })
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("晚间播报", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeAddHour(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+1h", fontSize = 12.sp) }
-                Spacer(Modifier.width(4.dp))
-                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeSubHour(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-1h", fontSize = 12.sp) }
-                Spacer(Modifier.width(4.dp))
-                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeAddMin(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+5m", fontSize = 12.sp) }
-                Spacer(Modifier.width(4.dp))
-                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeSubMin(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-5m", fontSize = 12.sp) }
-                Spacer(Modifier.width(8.dp))
-                Text(s.value.eveningReportTime, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(value = s.value.eveningReportTime, onValueChange = { v ->
+                    val clean = v.replace(":", "")
+                    val formatted = if (clean.length == 4) "${clean.take(2)}:${clean.drop(2)}" else v
+                    if (formatted.matches(Regex("^\\d{2}:\\d{2}$"))) {
+                        val h = formatted.take(2).toIntOrNull() ?: return@OutlinedTextField
+                        val m = formatted.drop(3).toIntOrNull() ?: return@OutlinedTextField
+                        if (h in 0..23 && m in 0..59) s.value = s.value.copy(eveningReportTime = formatted)
+                    } else if (v.length <= 5) {
+                        s.value = s.value.copy(eveningReportTime = v)
+                    }
+                }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(100.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("21:00", fontSize = 14.sp) })
             }
         }
         Spacer(Modifier.height(24.dp))
