@@ -210,6 +210,23 @@ fun AppMain() {
                 changed = true
             }
             if (changed) saveAll()
+            // 启动时补同步日历：已有任务但未同步过的
+            if (settings.autoSyncCalendar) {
+                val toSync = tasks.filter { !it.isCompleted && !it.isArchived && it.calendarEventId == null && (it.deadline != null || it.plannedDates.isNotEmpty()) }
+                if (toSync.isNotEmpty()) {
+                    var synced = false
+                    for (task in toSync) {
+                        val syncDate = task.deadline ?: task.plannedDates.first()
+                        try {
+                            val eid = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.example.aitodoapp.data.CalendarSyncHelper.createEvent(context, task.title, syncDate, settings.defaultReminderMinutes)
+                            }
+                            if (eid != null) { tasks = tasks.map { if (it.id == task.id) it.copy(calendarEventId = eid) else it }; synced = true }
+                        } catch (_: Exception) {}
+                    }
+                    if (synced) saveAll()
+                }
+            }
         }
     }
 
@@ -276,11 +293,14 @@ fun AppMain() {
 
     var selectedDay by remember { mutableStateOf(DayFilter.TODAY) }
     val allActive = tasks.filter { !it.isArchived }
-    val overdueTasks = allActive.filter { it.deadline != null && it.deadline < today && !it.isCompleted }
+    val overdueTasks = allActive.filter { !it.isCompleted && (it.deadline != null && it.deadline < today || it.plannedDates.isNotEmpty() && it.plannedDates.all { d -> d < today }) }
     val activeTasks = when (selectedDay) {
         DayFilter.OVERDUE -> allActive.filter { it.deadline != null && it.deadline < today && !it.isCompleted }
         DayFilter.ALL -> allActive
-        DayFilter.TODAY -> allActive.filter { it.isCompleted || it.plannedDates.any { d -> d == today } || it.deadline == today || (it.plannedDates.isEmpty() && it.createdAt <= today && (it.deadline == null || it.deadline >= today)) }
+        DayFilter.TODAY -> allActive.filter { 
+            val todayRelevant = it.plannedDates.any { d -> d == today } || it.deadline == today || (it.plannedDates.isEmpty() && it.createdAt <= today && (it.deadline == null || it.deadline >= today))
+            todayRelevant || (it.isCompleted && it.completedAt == today)
+        }
         else -> { val d = selectedDay.date(today) ?: today; allActive.filter { it.plannedDates.any { p -> p == d } || (it.plannedDates.isEmpty() && it.createdAt <= d && (it.deadline == null || it.deadline >= d)) } }
     }
     val archivedTasks = tasks.filter { it.isArchived }
@@ -296,7 +316,7 @@ fun AppMain() {
         when (tab) {
             0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl -> addTask(t, p, d, tags, c, pl) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk -> updateTask(id, t, c, p, d, tags, pl, lk) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage)
             1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
-            2 -> TagManagerScreen(allTags, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
+            2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding))
         }
     }
@@ -824,8 +844,8 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TagManagerScreen(allTags: List<Tag>, onCreate: (String) -> Unit, onPromote: (String) -> Unit, onDelete: (String) -> Unit, modifier: Modifier) {
-    var newTagName by remember { mutableStateOf("") }
+fun TagManagerScreen(allTags: List<Tag>, allTasks: List<Task>, onCreate: (String) -> Unit, onPromote: (String) -> Unit, onDelete: (String) -> Unit, modifier: Modifier) {
+    var newTagName by remember { mutableStateOf("") }; var selectedTag by remember { mutableStateOf("") }
     val formalTags = allTags.filter { !it.isTemporary }; val tempTags = allTags.filter { it.isTemporary }
     Column(modifier.fillMaxSize().padding(20.dp)) {
         Text("标签管理", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -837,7 +857,7 @@ fun TagManagerScreen(allTags: List<Tag>, onCreate: (String) -> Unit, onPromote: 
             Spacer(Modifier.width(8.dp)); Button({ onCreate(newTagName.trim()); newTagName = "" }, shape = RoundedCornerShape(12.dp)) { Text("创建") }
         }
         Spacer(Modifier.height(8.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { formalTags.forEach { TagChip(it.name, false) { onDelete(it.name) } }; if (formalTags.isEmpty()) Text("还没有正式标签", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { formalTags.forEach { val cnt = allTasks.count { t -> t.tags.contains(it.name) }; TagChip(it.name + " (" + cnt.toString() + ")", false, onDelete = { onDelete(it.name) }, onClick = { selectedTag = it.name }) }; if (formalTags.isEmpty()) Text("还没有正式标签", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Spacer(Modifier.height(24.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Text("临时标签", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); Spacer(Modifier.width(8.dp)); Text("(${tempTags.size})", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Spacer(Modifier.height(4.dp)); Text("添加任务时自动收录，点击箭头转为正式标签", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -848,16 +868,48 @@ fun TagManagerScreen(allTags: List<Tag>, onCreate: (String) -> Unit, onPromote: 
             OutlinedButton({ onPromote(tag.name) }, shape = RoundedCornerShape(8.dp), modifier = Modifier.height(32.dp)) { Text("→ 转为正式", fontSize = 12.sp) }
             Spacer(Modifier.width(8.dp)); Text("✕", color = MaterialTheme.colorScheme.error, fontSize = 14.sp, modifier = Modifier.clip(CircleShape).padding(4.dp).clickable { onDelete(tag.name) }) } } }
     }
+        if (selectedTag.isNotEmpty()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable { selectedTag = "" }.padding(32.dp), contentAlignment = Alignment.Center) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surface).padding(24.dp)) {
+                    Text("🏷 " + selectedTag, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Spacer(Modifier.height(12.dp))
+                    val taggedTasks = allTasks.filter { it.tags.contains(selectedTag) }
+                    if (taggedTasks.isEmpty()) {
+                        Text("没有任务使用此标签", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Text("共 " + taggedTasks.size.toString() + " 个任务", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                            taggedTasks.forEach { task ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (task.isCompleted) "✅" else "⬜", fontSize = 14.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(task.title, style = MaterialTheme.typography.bodyMedium, fontWeight = if (task.isCompleted) FontWeight.Normal else FontWeight.Medium, textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None)
+                                        Text(if (task.deadline != null) java.time.format.DateTimeFormatter.ofPattern("M月d日").format(task.deadline) else "无截止", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(onClick = { selectedTag = "" }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("关闭") }
+                }
+            }
+        }
 }
 
 // ============ 标签组件 ============
 
 @Composable
-fun TagChip(name: String, isTemporary: Boolean, onDelete: () -> Unit) {
+fun TagChip(name: String, isTemporary: Boolean, onDelete: () -> Unit, onClick: () -> Unit = {}) {
     val bg = if (isTemporary) MaterialTheme.colorScheme.outline.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer
     val fg = if (isTemporary) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onPrimaryContainer
     Row(Modifier.clip(RoundedCornerShape(20.dp)).background(bg).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (isTemporary) "📌 " else "#", fontSize = 12.sp, color = fg); Text(name, style = MaterialTheme.typography.labelMedium, color = fg)
+        Text(if (isTemporary) "📌 " else "#", fontSize = 12.sp, color = fg); Text(name, style = MaterialTheme.typography.labelMedium, color = fg, modifier = Modifier.clickable(onClick = onClick))
         Spacer(Modifier.width(6.dp)); Text("✕", fontSize = 12.sp, color = fg.copy(alpha = 0.5f), modifier = Modifier.clickable(onClick = onDelete))
     }
 }
@@ -891,7 +943,7 @@ fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String,
             Spacer(Modifier.height(12.dp))
             Text("标签", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
             Spacer(Modifier.height(4.dp))
-            if (selectedTags.isNotEmpty()) { FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(6.dp)) { selectedTags.forEach { TagChip(it, false) { selectedTags = selectedTags.filter { t -> t != it } } } }; Spacer(Modifier.height(6.dp)) }
+            if (selectedTags.isNotEmpty()) { FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(6.dp)) { selectedTags.forEach { TagChip(it, false, onDelete = { selectedTags = selectedTags.filter { t -> t != it } }) } }; Spacer(Modifier.height(6.dp)) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(value = tagInput, onValueChange = { tagInput = it; showTagSuggest = true }, placeholder = { Text(if (suggestions.isEmpty()) "输入新标签" else "输入或选择标签") }, singleLine = true, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp))
                 Spacer(Modifier.width(8.dp)); Button({ val n = tagInput.trim(); if (n.isNotBlank() && n !in selectedTags) { selectedTags = selectedTags + n; tagInput = "" } }, shape = RoundedCornerShape(10.dp), modifier = Modifier.height(52.dp)) { Text("+") }
@@ -992,7 +1044,7 @@ fun EditTaskDialog(task: Task, allTags: List<Tag>, onDismiss: () -> Unit, onSave
             Spacer(Modifier.height(12.dp))
             Text("标签", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
             Spacer(Modifier.height(4.dp))
-            if (selectedTags.isNotEmpty()) { FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(6.dp)) { selectedTags.forEach { TagChip(it, false) { selectedTags = selectedTags.filter { t -> t != it } } } }; Spacer(Modifier.height(6.dp)) }
+            if (selectedTags.isNotEmpty()) { FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp), Arrangement.spacedBy(6.dp)) { selectedTags.forEach { TagChip(it, false, onDelete = { selectedTags = selectedTags.filter { t -> t != it } }) } }; Spacer(Modifier.height(6.dp)) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(value = tagInput, onValueChange = { tagInput = it; showTagSuggest = true }, placeholder = { Text(if (suggestions.isEmpty()) "输入新标签" else "输入或选择标签") }, singleLine = true, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp))
                 Spacer(Modifier.width(8.dp)); Button({ val n = tagInput.trim(); if (n.isNotBlank() && n !in selectedTags) { selectedTags = selectedTags + n; tagInput = "" } }, shape = RoundedCornerShape(10.dp), modifier = Modifier.height(52.dp)) { Text("+") }

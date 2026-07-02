@@ -26,14 +26,25 @@ object SettingsRepository {
             else json.decodeFromString<Settings>(text)
         } catch (e: Exception) {
             e.printStackTrace()
+            try {
+                val bak = File(f.absolutePath + ".bak")
+                if (bak.exists()) {
+                    val text = bak.readText()
+                    if (text.isNotBlank()) return json.decodeFromString<Settings>(text)
+                }
+            } catch (_: Exception) {}
             Settings()
         }
     }
 
     fun save(settings: Settings) {
         val f = file ?: return
-        try { f.writeText(json.encodeToString(settings)) }
-        catch (e: Exception) { e.printStackTrace() }
+        val bak = File(f.absolutePath + ".bak")
+        try {
+            if (f.exists()) { if (bak.exists()) bak.delete(); f.renameTo(bak) }
+            f.writeText(json.encodeToString(settings))
+            if (bak.exists()) bak.delete()
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     @Serializable
