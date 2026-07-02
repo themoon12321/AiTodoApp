@@ -328,7 +328,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
             try {
                 val eid = CalendarSyncHelper.createEvent(context, title, syncDate, settings.defaultReminderMinutes,
                     time = newTask.deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
-                    durationMinutes = settings.defaultDurationMinutes)
+                    durationMinutes = newTask.estimatedMinutes ?: settings.defaultDurationMinutes)
                 if (eid != null) tasks = tasks.map { if (it.id == newTask.id) it.copy(calendarEventId = eid) else it }
             } catch (_: Exception) {}
         }
@@ -344,7 +344,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                 try {
                     val eid = CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes,
                         time = deadlineTime?.let { try { java.time.LocalTime.parse(it) } catch (_: Exception) { null } },
-                        durationMinutes = settings.defaultDurationMinutes)
+                        durationMinutes = tasks.find { it.id == id }?.estimatedMinutes ?: settings.defaultDurationMinutes)
                     tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
                     saveAll(); return
                 } catch (_: Exception) {}
