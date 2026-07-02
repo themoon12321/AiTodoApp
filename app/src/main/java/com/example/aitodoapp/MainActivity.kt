@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -163,6 +164,8 @@ fun findBestMatch(tasks: List<Task>, criteria: MatchCriteria): Task? {
 // ============ 主 Activity ============
 
 class MainActivity : ComponentActivity() {
+    private var openReportTrigger by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         TaskRepository.init(applicationContext)
@@ -170,14 +173,20 @@ class MainActivity : ComponentActivity() {
         TokenRepository.init(applicationContext)
         ReportRepository.init(applicationContext)
         NotificationHelper.createChannel(applicationContext)
-        setContent { AiTodoAppTheme { AppMain() } }
+        if (intent?.getBooleanExtra("open_report", false) == true) openReportTrigger = true
+        setContent { AiTodoAppTheme { AppMain(openReportTrigger) { openReportTrigger = false } } }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("open_report", false)) openReportTrigger = true
     }
 }
 
 // ============ 主导航 ============
 
 @Composable
-fun AppMain() {
+fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit = {}) {
     val today = LocalDate.now()
     var tab by remember { mutableStateOf(0) }
     var tasks by remember { mutableStateOf(TaskRepository.load<Task>("tasks.json")) }
@@ -334,7 +343,7 @@ fun AppMain() {
         }
     }) { innerPadding ->
         when (tab) {
-            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive -> if (archive) archiveTask(id) else unarchiveTask(id) })
+            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive -> if (archive) archiveTask(id) else unarchiveTask(id) }, openReportTrigger = openReportTrigger, onClearReportTrigger = onClearReportTrigger)
             1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->
