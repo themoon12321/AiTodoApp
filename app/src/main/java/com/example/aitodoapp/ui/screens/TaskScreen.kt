@@ -173,6 +173,8 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
                 val taskDescriptions = aiTaskList.map { t ->
                     val prefix = when {
+                        t.isDeleted -> "[已删除] "
+                        t.isArchived -> "[已归档] "
                         t.isCompleted -> "[已完成] "
                         overdueTasks.any { it.id == t.id } -> "[过期] "
                         else -> ""

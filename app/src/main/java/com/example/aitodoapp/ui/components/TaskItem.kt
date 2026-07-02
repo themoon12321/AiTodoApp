@@ -1,6 +1,7 @@
 package com.example.aitodoapp.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,7 +46,7 @@ fun TaskItem(task: Task, isArchive: Boolean, onComplete: () -> Unit, onDelete: (
     val isDueToday = task.deadline == today && !task.isCompleted
     val isDone = task.isCompleted || task.isArchived
     val planOverdue = task.plannedDates.isNotEmpty() && task.plannedDates.all { it < today } && !task.isCompleted
-    Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)) {
+    Column(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = onDelete).padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(4.dp).height(40.dp).clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp)).background(if (isDone) Color(0xFFBDBDBD) else task.priority.color))
             Spacer(Modifier.width(12.dp))
