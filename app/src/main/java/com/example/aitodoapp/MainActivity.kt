@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.aitodoapp.data.AiService
 import com.example.aitodoapp.data.CalendarSyncHelper
 import com.example.aitodoapp.data.LocalDateListSerializer
 import com.example.aitodoapp.data.LocalDateSerializer
@@ -30,6 +31,10 @@ import com.example.aitodoapp.data.ReportRepository
 import com.example.aitodoapp.data.SettingsRepository
 import com.example.aitodoapp.data.TaskRepository
 import com.example.aitodoapp.data.TokenRepository
+import com.example.aitodoapp.model.ReportEntry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import com.example.aitodoapp.ui.screens.SettingsScreen
 import com.example.aitodoapp.ui.screens.TagManagerScreen
 import com.example.aitodoapp.ui.screens.TaskScreen
@@ -332,7 +337,26 @@ fun AppMain() {
             0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive -> if (archive) archiveTask(id) else unarchiveTask(id) })
             1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
-            3 -> SettingsScreen(Modifier.padding(innerPadding))
+            3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->
+                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            val aiTasks = (tasks + overdueTasks).distinctBy { it.id }
+                            val descs = aiTasks.map { t ->
+                                val p = when { t.isCompleted -> "[已完成] "; overdueTasks.any { o -> o.id == t.id } -> "[过期] "; else -> "" }
+                                p + formatTaskForAi(t, today)
+                            }
+                            val tags = allTags.map { it.name }
+                            val result = AiService.generateDailyReport(descs, tags, isMorning)
+                            if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
+                                val entry = com.example.aitodoapp.model.ReportEntry(result.text, isMorning, today.toString())
+                                com.example.aitodoapp.data.ReportRepository.addReport(entry)
+                                com.example.aitodoapp.data.NotificationHelper.show(context,
+                                    if (isMorning) "🌅 早间播报已送达" else "🌙 晚间播报已送达",
+                                    if (isMorning) "测试播报已生成，点击📋图标查看" else "测试播报已生成，点击📋图标查看")
+                            }
+                        } catch (_: Exception) {}
+                    }
+                })
         }
     }
 }

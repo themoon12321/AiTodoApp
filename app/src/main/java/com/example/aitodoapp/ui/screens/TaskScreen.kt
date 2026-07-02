@@ -212,14 +212,15 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                     Text(dow, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
                 }
                 Spacer(Modifier.weight(1f))
-                if (showTokenUsage) {
-                    val todayTk = TokenRepository.getTodayTokens()
-                    if (todayTk.prompt + todayTk.completion > 0) {
-                        Text("⬆${todayTk.prompt} ⬇${todayTk.completion}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f))
+                Column(horizontalAlignment = Alignment.End) {
+                    ReportBadge(hasUnread = reports.any { !it.isRead }, onClick = { showReportView = true })
+                    if (showTokenUsage) {
+                        val todayTk = TokenRepository.getTodayTokens()
+                        if (todayTk.prompt + todayTk.completion > 0) {
+                            Text("⬆${todayTk.prompt} ⬇${todayTk.completion}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f))
+                        }
                     }
                 }
-                Spacer(Modifier.width(6.dp))
-                ReportBadge(hasUnread = reports.any { !it.isRead }, onClick = { showReportView = true })
             }
             // AI 处理进度 / 完成反馈
             if (aiLoading) {
@@ -233,42 +234,6 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(aiDoneMessage, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
-            }
-            // 播报生成按钮（非归档模式）
-            if (!isArchive && reports.isEmpty()) {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        reportLoading = true
-                        val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
-                        val taskDescs = aiTaskList.map { t ->
-                            val prefix = when {
-                                t.isCompleted -> "[已完成] "
-                                overdueTasks.any { it.id == t.id } -> "[过期] "
-                                else -> ""
-                            }
-                            prefix + formatTaskForAi(t, today)
-                        }
-                        val tagNames = allTags.map { it.name }
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                val result = AiService.generateDailyReport(taskDescs, tagNames, true)
-                                scope.launch(Dispatchers.Main) {
-                                    if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
-                                        val entry = ReportEntry(result.text, true, today.toString())
-                                        ReportRepository.addReport(entry)
-                                        NotificationHelper.show(context, "🌅 早间播报已送达", generateRandomNotification(true))
-                                        // 刷新
-                                        reports = ReportRepository.load()
-                                    }
-                                    reportLoading = false
-                                }
-                            } catch (_: Exception) {
-                                scope.launch(Dispatchers.Main) { reportLoading = false }
-                            }
-                        }
-                    },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-                ) { Text(if (reportLoading) "⏳ 生成中..." else "🌅 生成早间播报", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary) }
             }
             // 日期筛选芯片
             if (!isArchive) {

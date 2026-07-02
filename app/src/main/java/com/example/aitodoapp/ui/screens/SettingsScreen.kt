@@ -42,7 +42,7 @@ import com.example.aitodoapp.ui.components.CalendarTestDialog
 // ============ 设置页 ============
 
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier) {
+fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Unit)? = null) {
     val s = remember { mutableStateOf(SettingsRepository.load()) }
     var apiUrl by remember { mutableStateOf(s.value.apiUrl) }
     var apiKey by remember { mutableStateOf(s.value.apiKey) }
@@ -196,6 +196,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(12.dp))
         Button(onClick = { showCalendarTest = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("测试日历写入") }
+        Spacer(Modifier.height(8.dp))
+        if (onTestReport != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onTestReport(true) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("🌅 测试早间播报", fontSize = 13.sp) }
+                Button(onClick = { onTestReport(false) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("🌙 测试晚间播报", fontSize = 13.sp) }
+            }
+        }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
         Button(onClick = { SettingsRepository.save(SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)); saved = true },
