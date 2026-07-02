@@ -328,7 +328,7 @@ $tagList
         val dayOfWeekChinese = dayNames[today.dayOfWeek.value]
         val period = if (isMorning) "早间" else "晚间"
         val emoji = if (isMorning) "🌅" else "🌙"
-        val eveningSummary = if (!isMorning) "📊 今日任务小结\n- 总任务: 5项 | 已完成: 1项 | 待办: 4项\n- 完成率: 20% 🎯\n" else ""
+        val eveningSummary = if (!isMorning) "📊 今日任务小结\n- 已完成: 1项 | 总任务: 5项 | 待办: 4项\n- 完成率: 20% 🎯\n" else ""
 
         val systemPrompt = """你是 AI 代办助手。根据当前任务列表生成${period}播报。
 严格按照下面的格式输出。
@@ -354,7 +354,7 @@ ${eveningSummary}---
 🌟 温馨提示：有温度有情绪的鼓励语
 
 ---
-💬 ${if (isMorning) "根据任务情况写一句暖心的早安问候" else "根据今天完成情况写一句温暖的晚安问候"}
+💬 ${if (isMorning) "根据任务情况写一句独一无二的早安问候，不要客套，可以带点俏皮、温暖或务实的语气，符合今天的任务状态" else "根据今天完成情况写一句温暖的晚安问候，具体到今天的任务表现，不套路"}
 
 规则：
 - 任务较多时只列出最关键的前5项
@@ -362,7 +362,7 @@ ${eveningSummary}---
 - ● 行格式：● 任务名称, 优先级: PX+emoji, 截止: 日期, 预估: Xh
 - 过期任务写"已过期 X天"而非截止日期
 - 💡 小贴士的 📌⏰🌟 不需要前置 - 符号
-- 💬 行语气自然温暖，每天不同
+- 💬 行结合当天具体任务写，不写通用祝福语
 
 当前任务列表：
 $taskList
