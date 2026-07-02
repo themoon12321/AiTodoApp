@@ -181,6 +181,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra("open_report", false)) openReportTrigger = true
     }
+
+    override fun onResume() {
+        super.onResume()
+        if (intent?.getBooleanExtra("open_report", false) == true) {
+            openReportTrigger = true
+        }
+    }
 }
 
 // ============ 主导航 ============

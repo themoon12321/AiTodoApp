@@ -64,6 +64,7 @@ fun ReportViewScreen(reports: List<ReportEntry>, onDismiss: () -> Unit) {
                 for (line in lines) {
                     val trimmed = line.trim()
                     when {
+                        // 空行
                         trimmed.isEmpty() -> Spacer(Modifier.height(4.dp))
 
                         // 分隔线 ---
@@ -71,54 +72,50 @@ fun ReportViewScreen(reports: List<ReportEntry>, onDismiss: () -> Unit) {
                             HorizontalDivider(Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                         }
 
-                        // 💬 暖心问候段（最小字）
+                        // 💬 暖心问候（最小字）
                         trimmed.startsWith("💬") -> {
                             Text(trimmed, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 lineHeight = 20.sp, modifier = Modifier.padding(vertical = 4.dp))
                         }
 
-                        // 🌟 温馨提示（稍小字，半粗）
+                        // 🌟 温馨提示（半粗）
                         trimmed.startsWith("🌟") -> {
                             Text(trimmed, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface,
                                 lineHeight = 20.sp, modifier = Modifier.padding(vertical = 3.dp))
                         }
 
-                        // 📌 / ⏰ / 🌟 小贴士内部项（半粗）
-                        trimmed.matches(Regex("^[-]?\\s*[📌⏰🌟]")) -> {
-                            val clean = trimmed.removePrefix("-").trim()
-                            Text(clean, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface,
+                        // 📌 / ⏰ 小贴士项（半粗）
+                        trimmed.startsWith("📌") || trimmed.startsWith("⏰") -> {
+                            Text(trimmed, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface,
                                 lineHeight = 20.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp))
                         }
 
-                        // Section header：以 emoji 开头（📋🔥💡📊🗓️💌等）
+                        // ⚠️ 过期提醒 header
+                        trimmed.startsWith("⚠️") -> {
+                            Text(trimmed, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE53935),
+                                modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+                        }
+
+                        // ● 任务行（蓝点 + 逗号分隔的键值对）
+                        trimmed.startsWith("● ") -> {
+                            renderTaskLine(trimmed, report.isMorning)
+                        }
+
+                        // Section header：以常见 emoji 开头
                         trimmed.matches(Regex("^[📋🔥💡📊🗓️💌📈🎯💎🔔⚡✅].*")) -> {
                             Text(trimmed, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                         }
 
-                        // 任务行：以 - 开头，含 | 分隔符
-                        trimmed.startsWith("- ") && trimmed.contains("|") -> {
-                            renderTaskLine(trimmed)
-                        }
-
-                        // 一般列表项
-                        trimmed.startsWith("- ") || trimmed.startsWith("● ") || trimmed.startsWith("• ") -> {
-                            Text(trimmed.removePrefix("- ").removePrefix("● ").removePrefix("• "), fontSize = 14.sp,
+                        // 一般列表项（以 - 开头）
+                        trimmed.startsWith("- ") || trimmed.startsWith("• ") -> {
+                            Text(trimmed.removePrefix("- ").removePrefix("• "), fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface, lineHeight = 20.sp,
                                 modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp))
                         }
 
-                        // 引用块
-                        trimmed.startsWith("> ") -> {
-                            Box(Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                Text(trimmed.substring(1).trim(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 20.sp)
-                            }
-                        }
-
-                        // 🌅🌙 标题行
-                        trimmed.matches(Regex("^[🌅🌙].*代办报告.*")) || trimmed.matches(Regex("^[🌅🌙].*")) -> {
+                        // 🌅 🌙 标题行
+                        trimmed.matches(Regex("^[🌅🌙].*")) -> {
                             Text(trimmed, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                                 color = if (report.isMorning) Color(0xFFFF8F00) else Color(0xFF5C6BC0),
                                 modifier = Modifier.padding(vertical = 2.dp))
@@ -146,39 +143,37 @@ fun ReportViewScreen(reports: List<ReportEntry>, onDismiss: () -> Unit) {
     }
 }
 
-/** 渲染单行任务：- 任务名称 | P0🔥 | 截止今天 | 2h */
+/** 渲染 ● 任务行：● 任务名称, 优先级: PX🔥, 截止: 日期, 预估: Xh */
 @Composable
-private fun renderTaskLine(line: String) {
-    val content = line.removePrefix("- ").trim()
-    val parts = content.split("|").map { it.trim() }.filter { it.isNotBlank() }
-    if (parts.isEmpty()) return
+private fun renderTaskLine(line: String, isMorning: Boolean) {
+    val content = line.removePrefix("● ").trim()
+    val parts = content.split(",").map { it.trim() }
+    val title = parts.firstOrNull() ?: content
+    val details = parts.drop(1).filter { it.isNotBlank() }
 
-    val title = parts[0]
-    val detailParts = parts.drop(1)
-
-    Column(Modifier.fillMaxWidth().padding(start = 4.dp, top = 3.dp, bottom = 3.dp)) {
-        val remaining = mutableListOf<String>()
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // 提取优先级 emoji
-            var priorityEmoji = ""
-            for (p in detailParts) {
-                val matched = Regex("P[0-4]").find(p)
-                if (matched != null) {
-                    priorityEmoji = when (matched.value) {
-                        "P0" -> "🔥"; "P1" -> "🔴"; "P2" -> "🟡"; "P3" -> "🟢"; else -> "⚪"
-                    }
-                    val rest = p.replace(matched.value, "").replace("🔥", "").replace("🔴", "").replace("🟡", "").replace("🟢", "").replace("⚪", "").trim()
-                    if (rest.isNotBlank()) remaining.add(rest.removePrefix(":").trim().removePrefix(":").trim())
-                } else {
-                    remaining.add(p)
-                }
+    var priorityEmoji = ""
+    val detailText = details.joinToString(" · ") { part ->
+        when {
+            part.startsWith("优先级", ignoreCase = true) || Regex("P[0-4]").containsMatchIn(part) -> {
+                val p = Regex("P[0-4]").find(part)?.value
+                priorityEmoji = when (p) { "P0" -> "🔥"; "P1" -> "🔴"; "P2" -> "🟡"; "P3" -> "🟢"; else -> "⚪" }
+                part.replace(Regex("优先级[:：]?\\s*"), "").replace(Regex("P[0-4]"), "").replace("🔥","").replace("🔴","").replace("🟡","").replace("🟢","").replace("⚪","").trim()
             }
-            if (priorityEmoji.isNotEmpty()) { Text(priorityEmoji, fontSize = 15.sp); Spacer(Modifier.width(4.dp)) }
+            part.startsWith("截止", ignoreCase = true) || part.startsWith("已过期", ignoreCase = true) -> "📅 $part"
+            part.startsWith("预估", ignoreCase = true) || part.startsWith("时长", ignoreCase = true) -> "⏱${part.substringAfter(":").trim()}"
+            else -> part
+        }
+    }.trim().removePrefix(":").trim()
+
+    Column(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("● ", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+            if (priorityEmoji.isNotEmpty()) { Text(priorityEmoji, fontSize = 14.sp); Spacer(Modifier.width(4.dp)) }
             Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         }
-        if (remaining.isNotEmpty()) {
-            Text(remaining.joinToString(" · "), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 1.dp, start = if (Regex("P[0-4]").find(detailParts.firstOrNull() ?: "") != null) 22.dp else 0.dp))
+        if (detailText.isNotBlank()) {
+            Text(detailText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp, start = 20.dp))
         }
     }
 }

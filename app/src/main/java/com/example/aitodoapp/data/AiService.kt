@@ -328,6 +328,7 @@ $tagList
         val dayOfWeekChinese = dayNames[today.dayOfWeek.value]
         val period = if (isMorning) "早间" else "晚间"
         val emoji = if (isMorning) "🌅" else "🌙"
+        val eveningSummary = if (!isMorning) "📊 今日任务小结\n- 总任务: 5项 | 已完成: 1项 | 待办: 4项\n- 完成率: 20% 🎯\n" else ""
 
         val systemPrompt = """你是 AI 代办助手。根据当前任务列表生成${period}播报。
 严格按照下面的格式输出。
@@ -337,27 +338,31 @@ ${emoji} ${period}代办报告 · ${today}（星期$dayOfWeekChinese）
 ---
 
 📋 今日待办提醒
-- 交大物实验报告 | P0🔥 | 截止今天 | 2h
-- 买数据线 | P4⚪ | 截止7月5日 | 0.5h
+${if (isMorning) "暂无当日截止任务，好好规划今天的工作吧！" else "回顾今天的完成情况。"}
 
-${if (isMorning) "🔥 本周紧急任务（截止本周内）\n- 机械建模作业 | 待办 | 截止7月4日 | 3h" else "📊 今日任务小结\n- 总任务: 5项 | 已完成: 1项 | 待办: 4项\n- 完成率: 20% 🎯"}
+🔥 本周紧急任务（截止本周内）
+● 交大物实验报告, 优先级: P0🔥, 截止: 7/3（周四）, 预估: 2h
+● 买数据线, 优先级: P4⚪, 截止: 7/5（周六）, 预估: 0.5h
 
----
+⚠️ 过期任务提醒（请尽快处理）
+● 洗衣服, 优先级: P2🟡, 已过期 2天, 预估: 1h
+
+${eveningSummary}---
 💡 ${if (isMorning) "早间" else "智能"}小贴士
-- 📌 今日重点：根据优先级给出具体建议
-- ⏰ 时间分配：按上午/下午/晚间给出分配
-- 🌟 温馨提示：有温度的鼓励语
+📌 今日重点：根据任务优先级给出具体可行的建议
+⏰ 时间分配：给出上午/下午/晚间的分段时间安排
+🌟 温馨提示：有温度有情绪的鼓励语
 
 ---
-💬 ${if (isMorning) "早安呀～根据任务情况写一句暖心问候" else "晚安～一句温暖的结束语"}
+💬 ${if (isMorning) "根据任务情况写一句暖心的早安问候" else "根据今天完成情况写一句温暖的晚安问候"}
 
 规则：
-- 每个 section 用 --- 分隔
-- 任务行格式：- 任务名称 | PX+emoji | 截止日期 | 时长
-- 小贴士列表用 - 📌/⏰/🌟 开头
-- 任务较多时只列前5项
-- 💬 行字体最小，语气自然温暖
-- 语气温暖鼓励，最后一句要自然有温度
+- 任务较多时只列出最关键的前5项
+- 没有任务时写"暂无当日截止任务"等自然文案
+- ● 行格式：● 任务名称, 优先级: PX+emoji, 截止: 日期, 预估: Xh
+- 过期任务写"已过期 X天"而非截止日期
+- 💡 小贴士的 📌⏰🌟 不需要前置 - 符号
+- 💬 行语气自然温暖，每天不同
 
 当前任务列表：
 $taskList
@@ -484,44 +489,3 @@ $tagList
     }
 }
 
-data class AiResult(val text: String, val actions: List<AiAction> = emptyList(), val promptTokens: Int = 0, val completionTokens: Int = 0)
-
-// ============ 扩展后的 AiAction ============
-
-sealed class AiAction {
-    data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList(), val deadlineTime: String? = null) : AiAction()
-    data class CompleteTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
-    data class DeleteTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
-    data class UpdateTask(
-        val title: String,
-        val matchDeadline: java.time.LocalDate? = null,
-        val matchDeadlineTime: String? = null,
-        val matchTags: List<String>? = null,
-        val matchContent: String? = null,
-        val matchPlannedDate: java.time.LocalDate? = null,
-        val newTitle: String? = null,
-        val priority: Priority? = null,
-        val deadline: java.time.LocalDate? = null,
-        val deadlineTime: String? = null,
-        val tags: List<String>? = null,
-        val plannedDates: List<java.time.LocalDate>? = null,
-        val plannedTimes: List<String>? = null
-    ) : AiAction()
-    data object CompletedTasks : AiAction()
-    // 设置
-    data class UpdateSettings(
-        val apiUrl: String? = null,
-        val apiKey: String? = null,
-        val model: String? = null,
-        val showOverdueInline: Boolean? = null,
-        val longPressChat: Boolean? = null,
-        val showTokenUsage: Boolean? = null,
-        val autoSyncCalendar: Boolean? = null,
-        val defaultReminderMinutes: Int? = null
-    ) : AiAction()
-    // 标签管理
-    data class ManageTag(val action: String, val tagName: String) : AiAction()
-    // 归档 / 取消归档
-    data class ArchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
-    data class UnarchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
-}
