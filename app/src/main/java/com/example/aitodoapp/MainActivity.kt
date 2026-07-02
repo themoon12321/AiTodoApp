@@ -107,6 +107,7 @@ data class MatchCriteria(
 
 fun formatTaskForAi(task: Task, today: LocalDate = LocalDate.now()): String {
     val parts = mutableListOf(task.title)
+    parts.add("${task.priority.emoji}${task.priority.label}")
     if (task.deadline != null) {
         val dStr = task.deadline.format(DateTimeFormatter.ofPattern("M/d"))
         val tStr = task.deadlineTime?.let { " $it" } ?: ""
