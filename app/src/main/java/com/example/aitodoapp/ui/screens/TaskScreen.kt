@@ -249,7 +249,7 @@ fun TaskScreen(
                 }
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
-                    ReportBadge(hasUnread = reports.any { !it.isRead }, onClick = { showReportView = true })
+                    ReportBadge(onClick = { showReportView = true })
                     if (settings.showTokenUsage) {
                         val todayTk = TokenRepository.getTodayTokens()
                         if (todayTk.prompt + todayTk.completion > 0) {
