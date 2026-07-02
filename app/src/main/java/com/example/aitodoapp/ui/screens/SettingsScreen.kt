@@ -251,7 +251,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             var showTrash by remember { mutableStateOf(false) }
             Button(onClick = { showTrash = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("📦 最近删除", fontSize = 13.sp) }
             if (showTrash) {
-                val trashTasks = remember { com.example.aitodoapp.data.TaskRepository.load<com.example.aitodoapp.Task>("tasks.json").filter { it.isDeleted } }
+                val trashTasks = com.example.aitodoapp.data.TaskRepository.load<com.example.aitodoapp.Task>("tasks.json").filter { it.isDeleted }
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = { showTrash = false },
                     title = { Text("最近删除（保留30天）", fontWeight = FontWeight.Bold) },
@@ -263,10 +263,14 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
                                 trashTasks.forEach { task ->
                                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                         androidx.compose.material3.Text(task.title, modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        TextButton(onClick = { onRestoreTask?.invoke(task.id); showTrash = false }) { Text("恢复", fontSize = 11.sp) }
-                                        TextButton(onClick = { onPermanentDelete?.invoke(task.id); showTrash = false }) { Text("删除", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
+                                        TextButton(onClick = { onRestoreTask?.invoke(task.id) }) { Text("恢复", fontSize = 11.sp) }
+                                        TextButton(onClick = { onPermanentDelete?.invoke(task.id) }) { Text("删除", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
                                     }
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                }
+                                if (trashTasks.isNotEmpty()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(onClick = { trashTasks.forEach { onPermanentDelete?.invoke(it.id) } }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("一键全部删除", fontSize = 13.sp) }
                                 }
                             }
                         }
