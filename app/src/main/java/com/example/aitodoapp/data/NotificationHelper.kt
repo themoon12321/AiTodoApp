@@ -9,10 +9,12 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.aitodoapp.MainActivity
+import java.util.concurrent.atomic.AtomicInteger
 
 object NotificationHelper {
     const val CHANNEL_ID = "ai_todo_notify"
     private const val CHANNEL_NAME = "AI 代办通知"
+    private val notifIdCounter = AtomicInteger(0)
 
     fun createChannel(context: Context) {
         val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT)
@@ -32,7 +34,7 @@ object NotificationHelper {
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             if (pendingIntent != null) builder.setContentIntent(pendingIntent)
-            NotificationManagerCompat.from(context).notify(System.currentTimeMillis().toInt(), builder.build())
+            NotificationManagerCompat.from(context).notify(notifIdCounter.incrementAndGet(), builder.build())
         } catch (_: Exception) {}
     }
 

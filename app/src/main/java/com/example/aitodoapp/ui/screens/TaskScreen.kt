@@ -86,6 +86,52 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
     var reports by remember { mutableStateOf(ReportRepository.load()) }
     val context = androidx.compose.ui.platform.LocalContext.current
     // 从通知点击打开播报页（不在 LaunchedEffect 内清除 trigger，避免 cancel）
+    // 共享的 AI 结果处理逻辑（避免两处重复）
+    fun processAiResult(result: com.example.aitodoapp.data.AiResult, aiTaskList: List<Task>) {
+        aiReply = result.text
+        var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
+        for (action in result.actions) {
+            when (action) {
+                is AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
+                is AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onComplete(it.id) }; completed++ }
+                is AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onDelete(it.id) }; deleted++ }
+                is AiAction.UpdateTask -> {
+                    val task = findBestMatch(aiTaskList, action.toMatchCriteria())
+                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
+                        onUpdateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, action.deadlineTime, action.plannedTimes ?: emptyList()); updated++
+                    }
+                }
+                is AiAction.CompletedTasks -> {
+                    val done = aiTaskList.filter { it.isCompleted }
+                    aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
+                }
+                is AiAction.UpdateSettings -> {
+                    val cur = SettingsRepository.load()
+                    val upd = cur.copy(apiUrl = action.apiUrl ?: cur.apiUrl, apiKey = action.apiKey ?: cur.apiKey, model = action.model ?: cur.model, showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline, longPressChat = action.longPressChat ?: cur.longPressChat, showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage, autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar, defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes)
+                    SettingsRepository.save(upd); onUpdateSettings(upd); settingsChanged++
+                }
+                is AiAction.ManageTag -> { onTagAction(action.action, action.tagName); tagged++ }
+                is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true) }; archived++ }
+                is AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false) }; unarchived++ }
+            }
+        }
+        val parts = mutableListOf<String>(); val details = mutableListOf<String>()
+        if (created > 0) { parts.add("📝添加了${created}个任务"); val a = result.actions.firstOrNull { it is AiAction.CreateTask } as? AiAction.CreateTask; if (a != null) { var d = a.title; if (a.deadline != null) d += " 截止${a.deadline?.format(DateTimeFormatter.ofPattern("M月d日")) ?: ""}"; if (a.deadlineTime != null) d += " ${a.deadlineTime}"; details.add(d) } }
+        if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
+        if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
+        if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
+        if (settingsChanged > 0) parts.add("⚙️已更新设置")
+        if (tagged > 0) parts.add("🏷已更新标签")
+        if (archived > 0) parts.add("📦已归档${archived}个")
+        if (unarchived > 0) parts.add("📤已恢复${unarchived}个")
+        if (parts.isNotEmpty()) {
+            aiDoneMessage = parts.joinToString(" ")
+            val notifBody = details.filter { it.isNotBlank() }.joinToString("\n")
+            NotificationHelper.show(context, "AI 代办", if (notifBody.isNotBlank()) notifBody else parts.joinToString(" "))
+        }
+        aiLoading = false; aiStatus = ""
+    }
+
     LaunchedEffect(openReportTrigger) {
         if (openReportTrigger) {
             showReportView = true
@@ -142,53 +188,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                         aiLoading = false; aiStatus = ""; return@withContext
                     }
                     aiReply = result.text
-                    var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
-                    for (action in result.actions) {
-                        when (action) {
-                            is AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
-                            is AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onComplete(it.id) }; completed++ }
-                            is AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onDelete(it.id) }; deleted++ }
-                            is AiAction.UpdateTask -> {
-                                val task = findBestMatch(aiTaskList, action.toMatchCriteria())
-                                if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
-                                    onUpdateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, action.deadlineTime, action.plannedTimes ?: emptyList()); updated++
-                                }
-                            }
-                            is AiAction.CompletedTasks -> {
-                                val done = aiTaskList.filter { it.isCompleted }
-                                aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
-                            }
-                            is AiAction.UpdateSettings -> {
-                                val cur = SettingsRepository.load()
-                                val updated = cur.copy(
-                                    apiUrl = action.apiUrl ?: cur.apiUrl, apiKey = action.apiKey ?: cur.apiKey,
-                                    model = action.model ?: cur.model, showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline,
-                                    longPressChat = action.longPressChat ?: cur.longPressChat, showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage,
-                                    autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar, defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes
-                                )
-                                SettingsRepository.save(updated); onUpdateSettings(updated); settingsChanged++
-                            }
-                            is AiAction.ManageTag -> { onTagAction(action.action, action.tagName); tagged++ }
-                            is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true) }; archived++ }
-                            is AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false) }; unarchived++ }
-                        }
-                    }
-                    val parts = mutableListOf<String>()
-                    val details = mutableListOf<String>()
-                    if (created > 0) { parts.add("📝添加了${created}个任务"); val a = result.actions.firstOrNull { it is AiAction.CreateTask } as? AiAction.CreateTask; if (a != null) { var d = a.title; if (a.deadline != null) d += " 截止${a.deadline?.format(DateTimeFormatter.ofPattern("M月d日")) ?: ""}"; if (a.deadlineTime != null) d += " ${a.deadlineTime}"; details.add(d) } }
-                    if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
-                    if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
-                    if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
-                    if (settingsChanged > 0) parts.add("⚙️已更新设置")
-                    if (tagged > 0) parts.add("🏷已更新标签")
-                    if (archived > 0) parts.add("📦已归档${archived}个")
-                    if (unarchived > 0) parts.add("📤已恢复${unarchived}个")
-                    if (parts.isNotEmpty()) {
-                        aiDoneMessage = parts.joinToString(" ")
-                        val notifBody = details.filter { it.isNotBlank() }.joinToString("\n")
-                        NotificationHelper.show(context, "AI 代办", if (notifBody.isNotBlank()) notifBody else parts.joinToString(" "))
-                    }
-                    aiLoading = false; aiStatus = ""
+                    processAiResult(result, aiTaskList)
                 }
             }
         }
@@ -334,40 +334,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                     scope.launch(Dispatchers.Main) {
                                         if (result.text.startsWith("网络请求失败")) { pendingRetryInput = t; aiReply = "⚠️ 网络不可用，回到前台自动重试..."; aiLoading = false; aiStatus = ""; return@launch }
                                         aiReply = result.text
-                                        var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
-                                        for (action in result.actions) {
-                                            when (action) {
-                                                is AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
-                                                is AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onComplete(it.id) }; completed++ }
-                                                is AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onDelete(it.id) }; deleted++ }
-                                                is AiAction.UpdateTask -> {
-                                                    val task = findBestMatch(aiTaskList, action.toMatchCriteria())
-                                                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
-                                                        onUpdateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, action.deadlineTime, action.plannedTimes ?: emptyList()); updated++
-                                                    }
-                                                }
-                                                is AiAction.CompletedTasks -> { val done = aiTaskList.filter { it.isCompleted }; aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" } }
-                                                is AiAction.UpdateSettings -> {
-                                                    val cur = SettingsRepository.load()
-                                                    val upd = cur.copy(apiUrl = action.apiUrl ?: cur.apiUrl, apiKey = action.apiKey ?: cur.apiKey, model = action.model ?: cur.model, showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline, longPressChat = action.longPressChat ?: cur.longPressChat, showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage, autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar, defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes)
-                                                    SettingsRepository.save(upd); onUpdateSettings(upd); settingsChanged++
-                                                }
-                                                is AiAction.ManageTag -> { onTagAction(action.action, action.tagName); tagged++ }
-                                                is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true) }; archived++ }
-                                                is AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false) }; unarchived++ }
-                                            }
-                                        }
-                                        val parts = mutableListOf<String>(); val details = mutableListOf<String>()
-                                        if (created > 0) { parts.add("📝添加了${created}个任务"); val a = result.actions.firstOrNull { it is AiAction.CreateTask } as? AiAction.CreateTask; if (a != null) { var d = a.title; if (a.deadline != null) d += " 截止${a.deadline?.format(DateTimeFormatter.ofPattern("M月d日")) ?: ""}"; if (a.deadlineTime != null) d += " ${a.deadlineTime}"; details.add(d) } }
-                                        if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
-                                        if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
-                                        if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
-                                        if (settingsChanged > 0) parts.add("⚙️已更新设置")
-                                        if (tagged > 0) parts.add("🏷已更新标签")
-                                        if (archived > 0) parts.add("📦已归档${archived}个")
-                                        if (unarchived > 0) parts.add("📤已恢复${unarchived}个")
-                                        if (parts.isNotEmpty()) { aiDoneMessage = parts.joinToString(" "); val notifBody = details.filter { it.isNotBlank() }.joinToString("\n"); NotificationHelper.show(context, "AI 代办", if (notifBody.isNotBlank()) notifBody else parts.joinToString(" ")) }
-                                        aiLoading = false; aiStatus = ""; chatInput = ""
+                                        processAiResult(result, aiTaskList)
                                     }
                                 } catch (_: kotlinx.coroutines.CancellationException) { aiLoading = false; aiStatus = "" }
                                 catch (e: Exception) { scope.launch(Dispatchers.Main) { aiReply = "出错了：${e.message}"; aiLoading = false; aiStatus = "" } }

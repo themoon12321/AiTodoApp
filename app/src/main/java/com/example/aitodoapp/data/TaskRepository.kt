@@ -22,7 +22,7 @@ object TaskRepository {
     inline fun <reified T> load(filename: String): List<T> {
         val dir = dataDir ?: return emptyList()
         val file = File(dir, filename)
-        val bakFile = File(dir, ".bak")
+        val bakFile = File(dir, "$filename.bak")
         if (!file.exists()) {
             // Primary file missing — try backup
             if (bakFile.exists()) {
@@ -61,7 +61,7 @@ object TaskRepository {
     inline fun <reified T> save(filename: String, data: List<T>) {
         val dir = dataDir ?: return
         val file = File(dir, filename)
-        val bakFile = File(dir, ".bak")
+        val bakFile = File(dir, "$filename.bak")
         try {
             // Rename existing to backup before overwriting
             if (file.exists()) {

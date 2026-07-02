@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +35,6 @@ import com.example.aitodoapp.data.TaskRepository
 import com.example.aitodoapp.data.TokenRepository
 import com.example.aitodoapp.model.ReportEntry
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import com.example.aitodoapp.ui.screens.SettingsScreen
 import com.example.aitodoapp.ui.screens.TagManagerScreen
@@ -196,6 +196,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit = {}) {
     val today = LocalDate.now()
+    val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
     var tasks by remember { mutableStateOf(TaskRepository.load<Task>("tasks.json")) }
     var allTags by remember { mutableStateOf(TaskRepository.load<Tag>("tags.json")) }
@@ -355,7 +356,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
             1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->
-                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         try {
                             val aiTasks = (tasks + overdueTasks).distinctBy { it.id }
                             val descs = aiTasks.map { t ->
