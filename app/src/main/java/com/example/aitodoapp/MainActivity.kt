@@ -38,6 +38,7 @@ import com.example.aitodoapp.data.TokenRepository
 import com.example.aitodoapp.model.ReportEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import com.example.aitodoapp.ui.screens.ArchiveScreen
 import com.example.aitodoapp.ui.screens.SettingsScreen
 import com.example.aitodoapp.ui.screens.TagManagerScreen
 import com.example.aitodoapp.ui.screens.TaskScreen
@@ -358,7 +359,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
     }) { innerPadding ->
         when (tab) {
             0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive -> if (archive) archiveTask(id) else unarchiveTask(id) }, openReportTrigger = openReportTrigger, onClearReportTrigger = onClearReportTrigger)
-            1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
+            1 -> ArchiveScreen(archivedTasks, ::unarchiveTask, ::deleteTask)
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->
                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
