@@ -79,7 +79,7 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean) -> Unit = { _, _ -> }, openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit = {}) {
+fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?, Int?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean) -> Unit = { _, _ -> }, openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit = {}) {
     val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var pendingRetryInput by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // 播报状态
     var showReportView by remember { mutableStateOf(false) }; var reportLoading by remember { mutableStateOf(false) }
@@ -92,7 +92,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
         var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
         for (action in result.actions) {
             when (action) {
-                is AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
+                is AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime, action.estimatedMinutes); created++ }
                 is AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onComplete(it.id) }; completed++ }
                 is AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onDelete(it.id) }; deleted++ }
                 is AiAction.UpdateTask -> {
@@ -346,7 +346,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 }
             }
         }
-        if (showInput) AddTaskDialog(allTags, { showInput = false }) { t, p, d, tags, c, pl, dt -> onAddTask(t, p, d, tags, c, pl, dt); showInput = false }
+        if (showInput) AddTaskDialog(allTags, { showInput = false }) { t, p, d, tags, c, pl, dt -> onAddTask(t, p, d, tags, c, pl, dt, null); showInput = false }
         if (editTarget != null) EditTaskDialog(editTarget!!, allTags, { editTarget = null }, { id, ti, c, p, d, tags, pl, locked, dt, pt -> onUpdateTask(id, ti, c, p, d, tags, pl, locked, dt, pt); editTarget = null }, { onDelete(editTarget!!.id); editTarget = null })
         // 播报查看页
         BackHandler(enabled = showReportView) {

@@ -141,13 +141,22 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text("默认提醒时间", style = MaterialTheme.typography.bodyMedium)
-                Text("提前 ${defaultRemind} 分钟提醒", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            OutlinedButton(onClick = { defaultRemind = (defaultRemind + 5).coerceAtMost(120) }, shape = RoundedCornerShape(8.dp)) { Text("+5", fontSize = 12.sp) }
+            Text("默认提醒", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            OutlinedTextField(value = defaultRemind.toString(), onValueChange = { v ->
+                val n = v.filter { it.isDigit() }.take(4).toIntOrNull()
+                if (n != null && n in 0..1440) defaultRemind = n; else if (v.isEmpty()) defaultRemind = 0
+            }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(80.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("30", fontSize = 14.sp) })
             Spacer(Modifier.width(4.dp))
-            OutlinedButton(onClick = { defaultRemind = (defaultRemind - 5).coerceAtLeast(0) }, shape = RoundedCornerShape(8.dp)) { Text("-5", fontSize = 12.sp) }
+            Text("分钟", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("默认时长", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            OutlinedTextField(value = s.value.defaultDurationMinutes.toString(), onValueChange = { v ->
+                val n = v.filter { it.isDigit() }.take(4).toIntOrNull()
+                if (n != null && n in 1..1440) s.value = s.value.copy(defaultDurationMinutes = n); else if (v.isEmpty()) s.value = s.value.copy(defaultDurationMinutes = 1)
+            }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(80.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("60", fontSize = 14.sp) })
+            Spacer(Modifier.width(4.dp))
+            Text("分钟", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(24.dp))
 
