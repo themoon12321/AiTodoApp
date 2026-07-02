@@ -205,7 +205,10 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         }
         if (onScheduleReport != null) {
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { onScheduleReport(true) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("⏰ 延迟1分钟播报", fontSize = 13.sp) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onScheduleReport(true) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("⏰ 1分钟后·早间", fontSize = 12.sp) }
+                Button(onClick = { onScheduleReport(false) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("⏰ 1分钟后·晚间", fontSize = 12.sp) }
+            }
         }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
