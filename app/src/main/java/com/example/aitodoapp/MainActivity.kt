@@ -352,7 +352,28 @@ fun AppMain() {
                                 com.example.aitodoapp.data.ReportRepository.addReport(entry)
                                 com.example.aitodoapp.data.NotificationHelper.show(context,
                                     if (isMorning) "🌅 早间播报已送达" else "🌙 晚间播报已送达",
-                                    if (isMorning) "测试播报已生成，点击📋图标查看" else "测试播报已生成，点击📋图标查看")
+                                    "测试播报已生成，点击📋图标查看")
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }, onScheduleReport = { isMorning ->
+                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        kotlinx.coroutines.delay(60000)
+                        try {
+                            val aiTasks = (tasks + overdueTasks).distinctBy { it.id }
+                            val descs = aiTasks.map { t ->
+                                val p = when { t.isCompleted -> "[已完成] "; overdueTasks.any { o -> o.id == t.id } -> "[过期] "; else -> "" }
+                                p + formatTaskForAi(t, today)
+                            }
+                            val tags = allTags.map { it.name }
+                            val result = AiService.generateDailyReport(descs, tags, isMorning)
+                            if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
+                                val entry = ReportEntry(result.text, isMorning, today.toString())
+                                ReportRepository.addReport(entry)
+                                val pi = com.example.aitodoapp.data.NotificationHelper.reportPendingIntent(context)
+                                com.example.aitodoapp.data.NotificationHelper.showWithIntent(context,
+                                    if (isMorning) "🌅 早间播报已送达" else "🌙 晚间播报已送达",
+                                    "点击查看今日播报详情", pi)
                             }
                         } catch (_: Exception) {}
                     }

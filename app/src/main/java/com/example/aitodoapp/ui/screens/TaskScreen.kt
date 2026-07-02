@@ -84,6 +84,15 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
     var showReportView by remember { mutableStateOf(false) }; var reportLoading by remember { mutableStateOf(false) }
     var reports by remember { mutableStateOf(ReportRepository.load()) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // 检查通知中打开播报的意图
+    val activity = context as? android.app.Activity
+    val openReportFromIntent = activity?.intent?.getBooleanExtra("open_report", false) == true
+    if (openReportFromIntent) {
+        activity?.intent?.removeExtra("open_report")
+    }
+    LaunchedEffect(openReportFromIntent) {
+        if (openReportFromIntent) showReportView = true
+    }
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val scope = lifecycleOwner.lifecycleScope
     val placeholders = remember { listOf("记个事...", "粘贴长文本或输入...", "告诉 AI 做什么...", "输入任务...", "试试自然语言...", "说你想做的事...") }
