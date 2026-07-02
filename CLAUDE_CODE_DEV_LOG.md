@@ -153,14 +153,6 @@
 - **SettingsRepository 备份**：写入前备份，损坏自动恢复（与原 TaskRepository 一致）
 - **plannedDates 过期归类**：计划日期全部过期的任务归入过期区
 
-### 待优化清单
-1. **语音入口不可用**：系统语音识别在 OPPO 被拦截
-2. **午夜自动归档未实现**：仅在 App 启动时归档一次
-3. **MainActivity.kt 单体巨石**：~900+ 行，无 ViewModel，无状态分层
-4. **前台 Service 通知**：后续做播报时需要
-5. **上下文多轮对话**：用户已提需求，待设计
-6. **用户画像**：用户自维护 + AI 自动更新
-
 
 ## 2026-07-02：日历同步 + Token 统计 + 多轮改进
 
@@ -184,13 +176,30 @@
 - **SettingsRepository 备份**：写入前备份，损坏自动恢复（与原 TaskRepository 一致）
 - **plannedDates 过期归类**：计划日期全部过期的任务归入过期区
 
+## 2026-07-02 后续：通知+超时+重试 + 多字段匹配引擎 + AI全功能控制
+
+### 做了什么
+- **通知权限**：声明 POST_NOTIFICATIONS，新增 NotificationHelper，通知内容显示具体任务而非计数
+- **超时优化**：OkHttp connectTimeout 15s / readTimeout 30s，避免后台网络断开后无限挂起
+- **后台自动重试**：网络失败后保存输入 → 回到前台自动重发 → 40s 安全兜底
+- **今日视图修复**：已完成任务只显示今天完成的（completedAt == today）
+- **多字段匹配引擎**：`findBestMatch` 评分制（标题50+截止30+时间20+标签20+内容15+计划日期25），平局歧义返回 null 避免误操作
+- **任务详情增强**：传给 AI 的任务列表含截止时间/标签/计划/内容摘要，不再只有标题
+- **complete_task/delete_task 扩展**：支持 deadline/deadline_time/tags/content/planned_date 多字段精确定位
+- **update_task 扩展**：match_ 前缀定位字段 + deadline_time/planned_times 修改字段
+- **update_settings 工具**：AI 可修改所有设置项（API/模型/开关/提醒）
+- **manage_tag 工具**：create/delete/promote 标签
+- **archive_task / unarchive_task 工具**：归档/恢复任务
+- **统一日历绑定**：沿用原有机制（创建→写日历，完成→删日历），不单独加日历工具
+- **架构决策**：保留现有 Function Calling + when 分支架构，8 个工具在当前体量下刚好合适
+
 ### 待优化清单
 1. **语音入口不可用**：系统语音识别在 OPPO 被拦截
 2. **午夜自动归档未实现**：仅在 App 启动时归档一次
-3. **MainActivity.kt 单体巨石**：~900+ 行，无 ViewModel，无状态分层
+3. **MainActivity.kt 单体巨石**：~1400+ 行，无 ViewModel，无状态分层
 4. **前台 Service 通知**：后续做播报时需要
 5. **上下文多轮对话**：用户已提需求，待设计
-6. **用户画像**：用户自维护 + AI 自动更新
+6. **用户画像**：AI 自主学习用户习惯，动态调整策略
 
 ## 常用命令
 
