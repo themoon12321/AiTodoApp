@@ -46,8 +46,9 @@ fun ArchiveScreen(
     val totalArchived = tasks.size
     // 每个日期组的展开状态
     val expandedMap = remember { mutableStateOf<Set<String>>(emptySet()) }
-    // 待确认删除的任务 ID
+    // 待确认删除/恢复的任务 ID
     var confirmDeleteId by remember { mutableStateOf<String?>(null) }
+    var confirmRestoreId by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
@@ -89,7 +90,8 @@ fun ArchiveScreen(
             // 该日期下的任务（仅展开时显示）
             if (dateKey in (expandedMap.value)) {
                 items(taskList, key = { it.id }) { task ->
-                    val isConfirming = confirmDeleteId == task.id
+                    val isConfirmingDelete = confirmDeleteId == task.id
+                    val isConfirmingRestore = confirmRestoreId == task.id
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -97,29 +99,21 @@ fun ArchiveScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.End
                     ) {
-                        Text(
-                            task.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { onUnarchive(task.id) }, modifier = Modifier.height(28.dp)) {
-                            Text("↩", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Spacer(Modifier.width(2.dp))
-                        if (isConfirming) {
-                            TextButton(onClick = { onDelete(task.id); confirmDeleteId = null }, modifier = Modifier.height(28.dp)) {
-                                Text("确认删除", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                            }
-                            TextButton(onClick = { confirmDeleteId = null }, modifier = Modifier.height(28.dp)) {
-                                Text("取消", fontSize = 11.sp)
-                            }
+                        Text(task.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        if (isConfirmingRestore) {
+                            Text("确认恢复", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { onUnarchive(task.id); confirmRestoreId = null })
+                            Spacer(Modifier.width(4.dp))
+                            Text("取消", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { confirmRestoreId = null })
                         } else {
-                            TextButton(onClick = { confirmDeleteId = task.id }, modifier = Modifier.height(28.dp)) {
-                                Text("✕", fontSize = 13.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
-                            }
+                            Text("↩", fontSize = 18.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { confirmRestoreId = task.id })
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        if (isConfirmingDelete) {
+                            Text("确认删除", fontSize = 12.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { onDelete(task.id); confirmDeleteId = null })
+                            Spacer(Modifier.width(4.dp))
+                            Text("取消", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { confirmDeleteId = null })
+                        } else {
+                            Text("✕", fontSize = 18.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f), modifier = Modifier.clickable { confirmDeleteId = task.id })
                         }
                     }
                 }
