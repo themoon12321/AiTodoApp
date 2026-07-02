@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.aitodoapp.data.ReportRepository
 import com.example.aitodoapp.data.SettingsRepository
 import com.example.aitodoapp.data.TokenRepository
 import com.example.aitodoapp.ui.components.CalendarTestDialog
@@ -231,6 +233,8 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
                 Button(onClick = { onScheduleReport(false) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("⏰ 1分钟后·晚间", fontSize = 12.sp) }
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = { ReportRepository.clearAll() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("🗑️ 清除播报记录", fontSize = 13.sp) }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
         Button(onClick = {

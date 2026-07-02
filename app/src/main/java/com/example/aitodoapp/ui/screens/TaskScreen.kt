@@ -1,5 +1,6 @@
 package com.example.aitodoapp.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -379,6 +380,10 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
         if (showInput) AddTaskDialog(allTags, { showInput = false }) { t, p, d, tags, c, pl, dt -> onAddTask(t, p, d, tags, c, pl, dt); showInput = false }
         if (editTarget != null) EditTaskDialog(editTarget!!, allTags, { editTarget = null }, { id, ti, c, p, d, tags, pl, locked, dt, pt -> onUpdateTask(id, ti, c, p, d, tags, pl, locked, dt, pt); editTarget = null }, { onDelete(editTarget!!.id); editTarget = null })
         // 播报查看页
+        BackHandler(enabled = showReportView) {
+            showReportView = false
+            onClearReportTrigger()
+        }
         if (showReportView) {
             val allReports = ReportRepository.load()
             ReportViewScreen(reports = allReports, onDismiss = {

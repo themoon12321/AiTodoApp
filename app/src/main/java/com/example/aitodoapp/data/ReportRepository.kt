@@ -52,4 +52,7 @@ object ReportRepository {
 
     /** 是否有未读播报 */
     fun hasUnread(): Boolean = load().any { !it.isRead }
+
+    /** 清除所有播报记录 */
+    fun clearAll() { save(emptyList()) }
 }
