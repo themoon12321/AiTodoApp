@@ -1,8 +1,5 @@
 package com.example.aitodoapp
 
-import android.app.ForegroundServiceStartNotAllowedException
-import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -177,7 +174,6 @@ class MainActivity : ComponentActivity() {
         ReportRepository.init(applicationContext)
         NotificationHelper.createChannel(applicationContext)
         if (intent?.getBooleanExtra("open_report", false) == true) openReportTrigger = true
-        startForegroundServiceCompat()
         setContent { AiTodoAppTheme { AppMain(openReportTrigger) { openReportTrigger = false } } }
     }
 
@@ -193,17 +189,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startForegroundServiceCompat() {
-        try {
-            val intent = Intent(this, ForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-        } catch (_: ForegroundServiceStartNotAllowedException) {
-        } catch (_: Exception) {}
-    }
 }
 
 // ============ 主导航 ============
@@ -356,42 +341,6 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
         else -> { val d = selectedDay.date(today) ?: today; allActive.filter { it.plannedDates.any { p -> p == d } || (it.plannedDates.isEmpty() && it.createdAt <= d && (it.deadline == null || it.deadline >= d)) } }
     }
     val archivedTasks = tasks.filter { it.isArchived }
-
-    // 补单：打开 App 时检查是否错过了播报时间
-    LaunchedEffect(loaded) {
-        if (loaded && settings.reportEnabled) {
-            val reports = ReportRepository.load()
-            val todayStr = today.toString()
-            val nowHour = java.time.LocalTime.now().hour
-            val morningHour = settings.morningReportTime.substringBefore(":").toIntOrNull() ?: 7
-            val eveningHour = settings.eveningReportTime.substringBefore(":").toIntOrNull() ?: 21
-
-            val aiTasks = (tasks + overdueTasks).distinctBy { it.id }
-            val descs = aiTasks.map { t -> formatTaskForAi(t, today) }
-            val tags = allTags.map { it.name }
-
-            if (nowHour >= morningHour && reports.none { it.date == todayStr && it.isMorning }) {
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        val result = AiService.generateDailyReport(descs, tags, true)
-                        if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
-                            ReportRepository.addReport(ReportEntry(result.text, true, todayStr))
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-            if (nowHour >= eveningHour && reports.none { it.date == todayStr && !it.isMorning }) {
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        val result = AiService.generateDailyReport(descs, tags, false)
-                        if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
-                            ReportRepository.addReport(ReportEntry(result.text, false, todayStr))
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-        }
-    }
 
     Scaffold(bottomBar = {
         NavigationBar {
