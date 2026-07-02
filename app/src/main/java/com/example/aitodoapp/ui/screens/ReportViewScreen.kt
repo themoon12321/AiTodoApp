@@ -83,10 +83,10 @@ fun ReportViewScreen(reports: List<ReportEntry>, onDismiss: () -> Unit) {
                                 lineHeight = 20.sp, modifier = Modifier.padding(vertical = 3.dp))
                         }
 
-                        // 📌 / ⏰ 小贴士内部项
-                        trimmed.matches(Regex("^[-]?\\s*[📌⏰]")) -> {
+                        // 📌 / ⏰ / 🌟 小贴士内部项（加粗）
+                        trimmed.matches(Regex("^[-]?\\s*[📌⏰🌟]")) -> {
                             val clean = trimmed.removePrefix("-").trim()
-                            Text(clean, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface,
+                            Text(clean, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface,
                                 lineHeight = 20.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp))
                         }
 
