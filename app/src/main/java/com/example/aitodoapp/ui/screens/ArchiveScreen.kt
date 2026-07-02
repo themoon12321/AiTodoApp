@@ -1,6 +1,7 @@
 package com.example.aitodoapp.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +46,8 @@ fun ArchiveScreen(
     val totalArchived = tasks.size
     // 每个日期组的展开状态
     val expandedMap = remember { mutableStateOf<Set<String>>(emptySet()) }
+    // 待确认删除的任务 ID
+    var confirmDeleteId by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
@@ -86,13 +89,14 @@ fun ArchiveScreen(
             // 该日期下的任务（仅展开时显示）
             if (dateKey in (expandedMap.value)) {
                 items(taskList, key = { it.id }) { task ->
+                    val isConfirming = confirmDeleteId == task.id
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(start = 20.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(start = 20.dp, top = 5.dp, bottom = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        // 任务标题
                         Text(
                             task.title,
                             style = MaterialTheme.typography.bodyMedium,
@@ -101,12 +105,21 @@ fun ArchiveScreen(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        // 操作按钮
-                        TextButton(onClick = { onUnarchive(task.id) }, modifier = Modifier.height(30.dp)) {
-                            Text("↩", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                        TextButton(onClick = { onUnarchive(task.id) }, modifier = Modifier.height(28.dp)) {
+                            Text("↩", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                         }
-                        TextButton(onClick = { onDelete(task.id) }, modifier = Modifier.height(30.dp)) {
-                            Text("✕", fontSize = 14.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                        Spacer(Modifier.width(2.dp))
+                        if (isConfirming) {
+                            TextButton(onClick = { onDelete(task.id); confirmDeleteId = null }, modifier = Modifier.height(28.dp)) {
+                                Text("确认删除", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                            }
+                            TextButton(onClick = { confirmDeleteId = null }, modifier = Modifier.height(28.dp)) {
+                                Text("取消", fontSize = 11.sp)
+                            }
+                        } else {
+                            TextButton(onClick = { confirmDeleteId = task.id }, modifier = Modifier.height(28.dp)) {
+                                Text("✕", fontSize = 13.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                            }
                         }
                     }
                 }

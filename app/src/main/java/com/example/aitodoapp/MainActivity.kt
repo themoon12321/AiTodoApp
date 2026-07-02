@@ -101,6 +101,8 @@ data class Task(
     @Serializable(with = LocalDateSerializer::class) val deadline: LocalDate? = null,
     val deadlineTime: String? = null,
     val isCompleted: Boolean = false, val isArchived: Boolean = false,
+    val isDeleted: Boolean = false,
+    @Serializable(with = LocalDateSerializer::class) val deletedAt: LocalDate? = null,
     @Serializable(with = LocalDateSerializer::class) val completedAt: LocalDate? = null,
     val calendarEventId: Long? = null
 )
@@ -269,6 +271,13 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                     if (synced) saveAll()
                 }
             }
+            // 清理超过30天的已删除任务
+            val cutoff = today.minusDays(30)
+            val hasOldDeleted = tasks.any { it.isDeleted && it.deletedAt != null && it.deletedAt!! < cutoff }
+            if (hasOldDeleted) {
+                tasks = tasks.filter { !(it.isDeleted && it.deletedAt != null && it.deletedAt!! < cutoff) }
+                saveAll()
+            }
         }
     }
 
@@ -295,7 +304,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
     fun deleteTask(id: String) {
         val t = tasks.find { it.id == id }
         if (t?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
-        tasks = tasks.filter { it.id != id }; saveAll()
+        tasks = tasks.map { if (it.id == id) it.copy(isDeleted = true, deletedAt = today) else it }; saveAll()
     }
     fun archiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = true) else it }; saveAll() }
     fun unarchiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = false, isCompleted = false) else it }; saveAll() }
@@ -335,7 +344,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
     }
 
     var selectedDay by remember { mutableStateOf(DayFilter.TODAY) }
-    val allActive = remember(tasks) { tasks.filter { !it.isArchived } }
+    val allActive = remember(tasks) { tasks.filter { !it.isArchived && !it.isDeleted } }
     val overdueTasks = remember(allActive) { allActive.filter { !it.isCompleted && (it.deadline != null && it.deadline < today || it.plannedDates.isNotEmpty() && it.plannedDates.all { d -> d < today }) } }
     val activeTasks = remember(selectedDay, allActive) {
     when (selectedDay) {
@@ -347,7 +356,8 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
         }
         else -> { val d = selectedDay.date(today) ?: today; allActive.filter { it.plannedDates.any { p -> p == d } || (it.plannedDates.isEmpty() && it.createdAt <= d && (it.deadline == null || it.deadline >= d)) } }
     } }
-    val archivedTasks = remember(tasks) { tasks.filter { it.isArchived } }
+    val archivedTasks = remember(tasks) { tasks.filter { it.isArchived && !it.isDeleted } }
+    val deletedTasks = remember(tasks) { tasks.filter { it.isDeleted }.sortedByDescending { it.deletedAt ?: it.createdAt } }
 
     Scaffold(bottomBar = {
         NavigationBar {
