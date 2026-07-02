@@ -243,6 +243,14 @@ private fun AiAction.UpdateTask.toMatchCriteria() = MatchCriteria(
     keyword = title, deadline = matchDeadline, deadlineTime = matchDeadlineTime,
     tags = matchTags, content = matchContent, plannedDate = matchPlannedDate
 )
+private fun AiAction.ArchiveTask.toMatchCriteria() = MatchCriteria(
+    keyword = title, deadline = deadline, deadlineTime = deadlineTime,
+    tags = tags, content = content, plannedDate = plannedDate
+)
+private fun AiAction.UnarchiveTask.toMatchCriteria() = MatchCriteria(
+    keyword = title, deadline = deadline, deadlineTime = deadlineTime,
+    tags = tags, content = content, plannedDate = plannedDate
+)
 
 // ============ 主 Activity ============
 
@@ -359,6 +367,7 @@ fun AppMain() {
         if (t?.calendarEventId != null) com.example.aitodoapp.data.CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
         tasks = tasks.filter { it.id != id }; saveAll()
     }
+    fun archiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = true) else it }; saveAll() }
     fun unarchiveTask(id: String) { tasks = tasks.map { if (it.id == id) it.copy(isArchived = false, isCompleted = false) else it }; saveAll() }
     fun addTag(n: String): String { val t = n.trim(); if (t.isBlank() || allTags.any { it.name == t }) return t; allTags = allTags + Tag(t, true); saveAll(); return t }
     fun createTag(n: String) { val t = n.trim(); if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll() } }
@@ -418,7 +427,7 @@ fun AppMain() {
         }
     }) { innerPadding ->
         when (tab) {
-            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage)
+            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage, onUpdateSettings = { s -> settings = s }, onTagAction = { act, name -> when (act) { "create" -> createTag(name); "delete" -> deleteTag(name); "promote" -> promoteTag(name) } }, onArchiveToggle = { id, archive -> if (archive) archiveTask(id) else unarchiveTask(id) })
             1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding))
@@ -725,7 +734,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false) {
+fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean) -> Unit = { _, _ -> }) {
     val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var pendingRetryInput by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // 使用 Activity 的 lifecycleScope，切后台时协程不被取消
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -783,7 +792,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                         aiLoading = false; aiStatus = ""; return@withContext
                     }
                     aiReply = result.text
-                    var created = 0; var completed = 0; var deleted = 0; var updated = 0
+                    var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
                     for (action in result.actions) {
                         when (action) {
                             is com.example.aitodoapp.data.AiAction.CreateTask -> {
@@ -805,6 +814,29 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                 val done = aiTaskList.filter { it.isCompleted }
                                 aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
                             }
+                            is com.example.aitodoapp.data.AiAction.UpdateSettings -> {
+                                val cur = SettingsRepository.load()
+                                val updated = cur.copy(
+                                    apiUrl = action.apiUrl ?: cur.apiUrl,
+                                    apiKey = action.apiKey ?: cur.apiKey,
+                                    model = action.model ?: cur.model,
+                                    showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline,
+                                    longPressChat = action.longPressChat ?: cur.longPressChat,
+                                    showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage,
+                                    autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar,
+                                    defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes
+                                )
+                                SettingsRepository.save(updated); onUpdateSettings(updated); settingsChanged++
+                            }
+                            is com.example.aitodoapp.data.AiAction.ManageTag -> {
+                                onTagAction(action.action, action.tagName); tagged++
+                            }
+                            is com.example.aitodoapp.data.AiAction.ArchiveTask -> {
+                                findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true) }; archived++
+                            }
+                            is com.example.aitodoapp.data.AiAction.UnarchiveTask -> {
+                                findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false) }; unarchived++
+                            }
                         }
                     }
                     val parts = mutableListOf<String>()
@@ -813,6 +845,10 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                     if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
                     if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
                     if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
+                    if (settingsChanged > 0) parts.add("⚙️已更新设置")
+                    if (tagged > 0) parts.add("🏷已更新标签")
+                    if (archived > 0) parts.add("📦已归档${archived}个")
+                    if (unarchived > 0) parts.add("📤已恢复${unarchived}个")
                     if (parts.isNotEmpty()) {
                         aiDoneMessage = parts.joinToString(" ")
                         val notifBody = details.filter { it.isNotBlank() }.joinToString("\n")
@@ -972,7 +1008,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                             aiLoading = false; aiStatus = ""; return@launch
                                         }
                                         aiReply = result.text
-                                        var created = 0; var completed = 0; var deleted = 0; var updated = 0
+                                        var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
                                         for (action in result.actions) {
                                             when (action) {
                                                 is com.example.aitodoapp.data.AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
@@ -999,6 +1035,23 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                                     val done = aiTaskList.filter { it.isCompleted }
                                                     aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
                                                 }
+                                                is com.example.aitodoapp.data.AiAction.UpdateSettings -> {
+                                                    val cur = SettingsRepository.load()
+                                                    val upd = cur.copy(
+                                                        apiUrl = action.apiUrl ?: cur.apiUrl,
+                                                        apiKey = action.apiKey ?: cur.apiKey,
+                                                        model = action.model ?: cur.model,
+                                                        showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline,
+                                                        longPressChat = action.longPressChat ?: cur.longPressChat,
+                                                        showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage,
+                                                        autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar,
+                                                        defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes
+                                                    )
+                                                    SettingsRepository.save(upd); onUpdateSettings(upd); settingsChanged++
+                                                }
+                                                is com.example.aitodoapp.data.AiAction.ManageTag -> { onTagAction(action.action, action.tagName); tagged++ }
+                                                is com.example.aitodoapp.data.AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, true) }; archived++ }
+                                                is com.example.aitodoapp.data.AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onArchiveToggle(it.id, false) }; unarchived++ }
                                             }
                                         }
                                         val parts = mutableListOf<String>()
@@ -1007,6 +1060,10 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                         if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
                                         if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
                                         if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
+                                        if (settingsChanged > 0) parts.add("⚙️已更新设置")
+                                        if (tagged > 0) parts.add("🏷已更新标签")
+                                        if (archived > 0) parts.add("📦已归档${archived}个")
+                                        if (unarchived > 0) parts.add("📤已恢复${unarchived}个")
                                         if (parts.isNotEmpty()) {
                                             aiDoneMessage = parts.joinToString(" ")
                                             val notifBody = details.filter { it.isNotBlank() }.joinToString("\n")

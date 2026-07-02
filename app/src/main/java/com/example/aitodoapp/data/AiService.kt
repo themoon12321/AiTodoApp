@@ -81,6 +81,10 @@ $tagList
 - delete_task：删除任务。必填title(关键词)，可传deadline/deadline_time/tags/content/planned_date精确定位
 - update_task：修改任务。必填title(关键词)，可传match_deadline/match_tags等定位，传new_title/priority等修改
 - completed_tasks：查看所有已完成任务（无需参数）
+- update_settings：修改设置。参数: api_url, api_key, model, show_overdue_inline(过期分区), long_press_chat(长按对话), show_token_usage(显示Token), auto_sync_calendar(日历同步), default_reminder_minutes(提醒分钟)
+- manage_tag：管理标签。参数: action(create/delete/promote), tag_name(标签名)
+- archive_task：归档任务。参数同delete_task（按多字段精确定位）
+- unarchive_task：取消归档。参数同delete_task（按多字段精确定位）
 
 规则：
 - 【工具选择】先判断用户意图再选工具。
@@ -88,7 +92,10 @@ $tagList
   ② 含"完成/做好了/搞定了/做完了"→complete_task
   ③ 含"改/修改/换/移到"→update_task
   ④ 用户询问完成了哪些任务/已完成的任务→completed_tasks
-  ⑤ 其他→create_task
+  ⑤ 含"归档/收起来"→archive_task，含"取消归档/恢复"→unarchive_task
+  ⑥ 含"标签/分类"→manage_tag
+  ⑦ 含"设置/配置/API"→update_settings
+  ⑧ 其他→create_task
 - 任务列表中标记了 [已完成] 的是已勾掉的任务，[过期] 的是已过期未完成的任务
 - 【标题精简】title 只保留任务核心名称，去掉时间词。如"明天下午开会"→"开会"，"后天交实验报告"→"交实验报告"
 - 【时间提取】从用户话中提取时间信息放到 planned_dates（计划时间）或 deadline（截止）中，不留在标题里。基于当前日期时间计算"今天/明天/后天/下周/上午/下午"等相对时间。提取具体时间时，deadline 设为 YYYY-MM-DD，deadline_time 设为 HH:mm（5分钟倍数）。注意：如果是考试/会议/活动等有明确时间的场景，planned_dates 和 deadline 应同时设为该日期
@@ -173,7 +180,7 @@ $tagList
                         put("type", "object")
                         putJsonObject("properties") {
                             putJsonObject("title") { put("type", "string"); put("description", "要修改的任务标题或关键词（必填）") }
-                            // 匹配过滤字段（用于精确查找要修改的任务）
+                            // 匹配过滤字段
                             putJsonObject("match_deadline") { put("type", "string"); put("description", "匹配的截止日期 YYYY-MM-DD（可选，用于定位）") }
                             putJsonObject("match_deadline_time") { put("type", "string"); put("description", "匹配的截止时间 HH:mm（可选，用于定位）") }
                             putJsonObject("match_tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "匹配的标签（可选，用于定位）") }
@@ -202,6 +209,84 @@ $tagList
                         put("type", "object")
                         putJsonObject("properties") {}
                         putJsonArray("required") {}
+                    }
+                }
+            }
+            // update_settings
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "update_settings")
+                    put("description", "修改设置")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("api_url") { put("type", "string"); put("description", "API 地址（可选）") }
+                            putJsonObject("api_key") { put("type", "string"); put("description", "API Key（可选）") }
+                            putJsonObject("model") { put("type", "string"); put("description", "模型名称（可选）") }
+                            putJsonObject("show_overdue_inline") { put("type", "boolean"); put("description", "过期任务是否分区显示（可选）") }
+                            putJsonObject("long_press_chat") { put("type", "boolean"); put("description", "长按打开AI对话框（可选）") }
+                            putJsonObject("show_token_usage") { put("type", "boolean"); put("description", "显示Token用量（可选）") }
+                            putJsonObject("auto_sync_calendar") { put("type", "boolean"); put("description", "自动同步系统日历（可选）") }
+                            putJsonObject("default_reminder_minutes") { put("type", "integer"); put("description", "默认提醒提前分钟数 0-120（可选）") }
+                        }
+                        putJsonArray("required") {}
+                    }
+                }
+            }
+            // manage_tag
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "manage_tag")
+                    put("description", "管理标签：创建/删除/转正")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("create")); add(JsonPrimitive("delete")); add(JsonPrimitive("promote")) }; put("description", "操作类型：create创建/delete删除/promote转正") }
+                            putJsonObject("tag_name") { put("type", "string"); put("description", "标签名") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("action")); add(JsonPrimitive("tag_name")) }
+                    }
+                }
+            }
+            // archive_task
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "archive_task")
+                    put("description", "归档任务。支持多字段精确定位")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("title") { put("type", "string"); put("description", "任务标题或关键词（必填）") }
+                            putJsonObject("deadline") { put("type", "string"); put("description", "匹配的截止日期 YYYY-MM-DD（可选）") }
+                            putJsonObject("deadline_time") { put("type", "string"); put("description", "匹配的截止时间 HH:mm（可选）") }
+                            putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "匹配的标签（可选）") }
+                            putJsonObject("content") { put("type", "string"); put("description", "匹配的描述关键词（可选）") }
+                            putJsonObject("planned_date") { put("type", "string"); put("description", "匹配的计划日期 YYYY-MM-DD（可选）") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("title")) }
+                    }
+                }
+            }
+            // unarchive_task
+            addJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "unarchive_task")
+                    put("description", "取消归档，将任务恢复至活跃列表。支持多字段精确定位")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") {
+                            putJsonObject("title") { put("type", "string"); put("description", "任务标题或关键词（必填）") }
+                            putJsonObject("deadline") { put("type", "string"); put("description", "匹配的截止日期 YYYY-MM-DD（可选）") }
+                            putJsonObject("deadline_time") { put("type", "string"); put("description", "匹配的截止时间 HH:mm（可选）") }
+                            putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "匹配的标签（可选）") }
+                            putJsonObject("content") { put("type", "string"); put("description", "匹配的描述关键词（可选）") }
+                            putJsonObject("planned_date") { put("type", "string"); put("description", "匹配的计划日期 YYYY-MM-DD（可选）") }
+                        }
+                        putJsonArray("required") { add(JsonPrimitive("title")) }
                     }
                 }
             }
@@ -283,6 +368,40 @@ $tagList
                             actions.add(AiAction.UpdateTask(t, md, mdt, mt, mc, mpd, nt, p, d, dlt, tags, pl, pt))
                         }
                         "completed_tasks" -> actions.add(AiAction.CompletedTasks)
+                        "update_settings" -> {
+                            val apiUrl = (args["api_url"] as? JsonPrimitive)?.content
+                            val apiKey = (args["api_key"] as? JsonPrimitive)?.content
+                            val model = (args["model"] as? JsonPrimitive)?.content
+                            val showOverdue = (args["show_overdue_inline"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+                            val longPress = (args["long_press_chat"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+                            val showToken = (args["show_token_usage"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+                            val autoSync = (args["auto_sync_calendar"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+                            val reminder = (args["default_reminder_minutes"] as? JsonPrimitive)?.content?.toIntOrNull()
+                            actions.add(AiAction.UpdateSettings(apiUrl, apiKey, model, showOverdue, longPress, showToken, autoSync, reminder))
+                        }
+                        "manage_tag" -> {
+                            val act = (args["action"] as? JsonPrimitive)?.content ?: continue
+                            val tn = (args["tag_name"] as? JsonPrimitive)?.content ?: continue
+                            actions.add(AiAction.ManageTag(act, tn))
+                        }
+                        "archive_task" -> {
+                            val t = (args["title"] as? JsonPrimitive)?.content ?: continue
+                            val dl = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            val dlt = (args["deadline_time"] as? JsonPrimitive)?.content
+                            val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
+                            val ct = (args["content"] as? JsonPrimitive)?.content
+                            val pd = try { java.time.LocalDate.parse((args["planned_date"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            actions.add(AiAction.ArchiveTask(t, dl, dlt, tags, ct, pd))
+                        }
+                        "unarchive_task" -> {
+                            val t = (args["title"] as? JsonPrimitive)?.content ?: continue
+                            val dl = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            val dlt = (args["deadline_time"] as? JsonPrimitive)?.content
+                            val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
+                            val ct = (args["content"] as? JsonPrimitive)?.content
+                            val pd = try { java.time.LocalDate.parse((args["planned_date"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            actions.add(AiAction.UnarchiveTask(t, dl, dlt, tags, ct, pd))
+                        }
                     }
                 }
             }
@@ -298,13 +417,6 @@ data class AiResult(val text: String, val actions: List<AiAction> = emptyList(),
 
 // ============ 扩展后的 AiAction ============
 
-/**
- * 多字段匹配规则：
- * - title：必填关键词（标题/内容模糊匹配）
- * - deadline/deadline_time/tags/content/planned_date：可选过滤条件
- * - 所有条件同时评分，取最高分（≥阈值）
- * - 平局时返回 null，避免误操作
- */
 sealed class AiAction {
     data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList(), val deadlineTime: String? = null) : AiAction()
     data class CompleteTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
@@ -325,4 +437,20 @@ sealed class AiAction {
         val plannedTimes: List<String>? = null
     ) : AiAction()
     data object CompletedTasks : AiAction()
+    // 设置
+    data class UpdateSettings(
+        val apiUrl: String? = null,
+        val apiKey: String? = null,
+        val model: String? = null,
+        val showOverdueInline: Boolean? = null,
+        val longPressChat: Boolean? = null,
+        val showTokenUsage: Boolean? = null,
+        val autoSyncCalendar: Boolean? = null,
+        val defaultReminderMinutes: Int? = null
+    ) : AiAction()
+    // 标签管理
+    data class ManageTag(val action: String, val tagName: String) : AiAction()
+    // 归档 / 取消归档
+    data class ArchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
+    data class UnarchiveTask(val title: String, val deadline: java.time.LocalDate? = null, val deadlineTime: String? = null, val tags: List<String>? = null, val content: String? = null, val plannedDate: java.time.LocalDate? = null) : AiAction()
 }
