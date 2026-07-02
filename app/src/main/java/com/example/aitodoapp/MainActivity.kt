@@ -394,6 +394,10 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                     com.example.aitodoapp.data.ReportWorker.schedule(context, isMorning, 1)
                 }, onScheduleDaily = { isMorning, hour, minute ->
                     com.example.aitodoapp.data.ReportWorker.scheduleDaily(context, isMorning, hour, minute)
+                }, onRestoreTask = { id ->
+                    tasks = tasks.map { if (it.id == id) it.copy(isDeleted = false, deletedAt = null) else it }; saveAll()
+                }, onPermanentDelete = { id ->
+                    tasks = tasks.filter { it.id != id }; saveAll()
                 })
         }
     }

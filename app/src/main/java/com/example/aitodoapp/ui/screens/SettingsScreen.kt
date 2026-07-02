@@ -34,6 +34,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -45,7 +47,7 @@ import com.example.aitodoapp.ui.components.CalendarTestDialog
 // ============ 设置页 ============
 
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Unit)? = null, onScheduleReport: ((Boolean) -> Unit)? = null, onScheduleDaily: ((isMorning: Boolean, hour: Int, minute: Int) -> Unit)? = null) {
+fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Unit)? = null, onScheduleReport: ((Boolean) -> Unit)? = null, onScheduleDaily: ((isMorning: Boolean, hour: Int, minute: Int) -> Unit)? = null, onRestoreTask: ((String) -> Unit)? = null, onPermanentDelete: ((String) -> Unit)? = null) {
     val s = remember { mutableStateOf(SettingsRepository.load()) }
     var apiUrl by remember { mutableStateOf(s.value.apiUrl) }
     var apiKey by remember { mutableStateOf(s.value.apiKey) }
@@ -235,6 +237,35 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         }
         Spacer(Modifier.height(8.dp))
         Button(onClick = { ReportRepository.clearAll() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("🗑️ 清除播报记录", fontSize = 13.sp) }
+        if (onRestoreTask != null) {
+            Spacer(Modifier.height(8.dp))
+            var showTrash by remember { mutableStateOf(false) }
+            Button(onClick = { showTrash = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("📦 最近删除", fontSize = 13.sp) }
+            if (showTrash) {
+                val trashTasks = remember { com.example.aitodoapp.data.TaskRepository.load<com.example.aitodoapp.Task>("tasks.json").filter { it.isDeleted } }
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showTrash = false },
+                    title = { Text("最近删除（保留30天）", fontWeight = FontWeight.Bold) },
+                    text = {
+                        if (trashTasks.isEmpty()) {
+                            Text("暂无删除的任务", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            Column {
+                                trashTasks.forEach { task ->
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        androidx.compose.material3.Text(task.title, modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        TextButton(onClick = { onRestoreTask?.invoke(task.id); showTrash = false }) { Text("恢复", fontSize = 11.sp) }
+                                        TextButton(onClick = { onPermanentDelete?.invoke(task.id); showTrash = false }) { Text("删除", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
+                                    }
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { showTrash = false }) { Text("关闭") } }
+                )
+            }
+        }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
         Button(onClick = {
