@@ -196,10 +196,48 @@
 ### 待优化清单
 1. **语音入口不可用**：系统语音识别在 OPPO 被拦截
 2. **午夜自动归档未实现**：仅在 App 启动时归档一次
-3. **MainActivity.kt 单体巨石**：~1400+ 行，无 ViewModel，无状态分层
-4. **前台 Service 通知**：后续做播报时需要
-5. **上下文多轮对话**：用户已提需求，待设计
-6. **用户画像**：AI 自主学习用户习惯，动态调整策略
+3. **前台 Service 通知**：后续做播报时需要
+4. **上下文多轮对话**：用户已提需求，待设计
+5. **用户画像**：AI 自主学习用户习惯，动态调整策略
+
+## 2026-07-02 最后：代码组织重构
+
+### 做了什么
+- **MainActivity.kt 拆分**：从 ~1440 行拆为 9 个文件，核心骨架保留 ~340 行
+- **分层结构**：`screens/` 页面级组件 + `components/` 可复用组件 + `data/` 数据层
+- **匹配引擎独立**：`findBestMatch` + `formatTaskForAi` 保留在 MainActivity.kt，`toMatchCriteria` 移到 `data/AiActionExt.kt`
+- **TagChip 独立**：从 TagManagerScreen 分离到 `components/TagChip.kt`，被 AddTaskDialog/EditTaskDialog/TagManagerScreen 共用
+- **编译通过**：所有文件独立引入必要 imports，无循环依赖
+
+### 当前文件结构
+```
+com.example.aitodoapp/
+├── MainActivity.kt          ← 骨架（模型+引擎+导航）
+├── data/
+│   ├── AiActionExt.kt       ← 新增：匹配转换
+│   ├── AiService.kt
+│   ├── CalendarSyncHelper.kt
+│   ├── SettingsRepository.kt
+│   └── ...
+├── ui/
+│   ├── screens/
+│   │   ├── TaskScreen.kt       ← AI对话+任务列表+过期
+│   │   ├── SettingsScreen.kt   ← 设置页
+│   │   └── TagManagerScreen.kt ← 标签管理
+│   ├── components/
+│   │   ├── TaskItem.kt
+│   │   ├── TagChip.kt
+│   │   ├── AddTaskDialog.kt
+│   │   ├── EditTaskDialog.kt
+│   │   └── CalendarTestDialog.kt
+│   └── theme/
+└── voice/
+```
+### 架构原则
+- 每个文件 100-200 行，聚焦单一职责
+- `screens` → `components` 单向依赖（屏幕用组件）
+- `data` 层不依赖 UI
+- 新增功能：在对应目录加文件即可
 
 ## 常用命令
 
