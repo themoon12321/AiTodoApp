@@ -338,7 +338,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
     fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList()) {
         tags.forEach { addTag(it) }
         val old = tasks.find { it.id == id }
-        if (old?.deadline != dl) {
+        if (old?.deadline != dl || old?.deadlineTime != deadlineTime) {
             if (old?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, old.calendarEventId!!)
             if (settings.autoSyncCalendar && dl != null) {
                 try {
