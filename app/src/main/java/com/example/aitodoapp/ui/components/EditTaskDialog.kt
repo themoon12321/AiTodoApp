@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -65,9 +66,8 @@ fun EditTaskDialog(
     var selectedPriority by remember { mutableStateOf(task.priority) }; var hasDeadline by remember { mutableStateOf(task.deadline != null) }
     var deadlineDate by remember { mutableStateOf(task.deadline ?: LocalDate.now()) }; var showPriorityMenu by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
-    var dh by remember { mutableStateOf(if (task.deadlineTime != null) task.deadlineTime!!.substringBefore(":").toIntOrNull() ?: 10 else 10) }
-    var dm by remember { mutableStateOf(if (task.deadlineTime != null) task.deadlineTime!!.substringAfter(":").toIntOrNull() ?: 0 else 0) }
-    var ph by remember { mutableStateOf(if (task.plannedTimes.isNotEmpty()) task.plannedTimes.first().substringBefore(":").toIntOrNull() ?: 10 else 10) }
+    var deadlineTimeStr by remember { mutableStateOf(task.deadlineTime ?: "") }
+    var plannedTimeStr by remember { mutableStateOf(task.plannedTimes.firstOrNull() ?: "") }
     var pm by remember { mutableStateOf(if (task.plannedTimes.isNotEmpty()) task.plannedTimes.first().substringAfter(":").toIntOrNull() ?: 0 else 0) }
     var hasPlan by remember { mutableStateOf(task.plannedDates.isNotEmpty()) }
     var plannedDates by remember { mutableStateOf(task.plannedDates) }; var showPlanPicker by remember { mutableStateOf(false) }
@@ -118,12 +118,16 @@ fun EditTaskDialog(
                     Text("📅 ${deadlineDate.format(DateTimeFormatter.ofPattern("M月d日  EEEE"))}", fontSize = 15.sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { dh = (dh + 1) % 24 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) {
-                        Text("🕐 ${dh.toString().padStart(2,'0')}:${dm.toString().padStart(2,'0')}", fontSize = 13.sp)
-                    }
-                    OutlinedButton(onClick = { dm = (dm + 5) % 60 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) { Text("分钟 +5", fontSize = 12.sp) }
-                    OutlinedButton(onClick = { dm = (dm - 5 + 60) % 60 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) { Text("分钟 -5", fontSize = 12.sp) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("时间：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = deadlineTimeStr, onValueChange = { v ->
+                        val clean = v.replace(":", "")
+                        val formatted = if (clean.length == 4) "${clean.take(2)}:${clean.drop(2)}" else v
+                        if (formatted.matches(Regex("^\\d{2}:\\d{2}$"))) {
+                            val h = formatted.take(2).toIntOrNull() ?: return@OutlinedTextField; val m = formatted.drop(3).toIntOrNull() ?: return@OutlinedTextField
+                            if (h in 0..23 && m in 0..59) deadlineTimeStr = formatted
+                        } else if (v.length <= 5) deadlineTimeStr = v
+                    }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(100.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("HH:mm", fontSize = 14.sp) })
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -140,28 +144,23 @@ fun EditTaskDialog(
                 OutlinedButton(onClick = { showPlanPicker = true }, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) { Text("+ 选择日期", fontSize = 13.sp) }
                 if (hasPlan && plannedDates.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    Text("时间：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { ph = (ph + 1) % 24 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) {
-                            Text("🕐 ${ph.toString().padStart(2,'0')}:${pm.toString().padStart(2,'0')}", fontSize = 13.sp)
-                        }
-                        OutlinedButton(onClick = { pm = (pm + 5) % 60 }, shape = RoundedCornerShape(8.dp)) { Text("+5", fontSize = 12.sp) }
-                        OutlinedButton(onClick = { pm = (pm - 5 + 60) % 60 }, shape = RoundedCornerShape(8.dp)) { Text("-5", fontSize = 12.sp) }
-                        OutlinedButton(onClick = {
-                            val times = listOf("08:00","09:00","10:00","12:00","14:00","15:00","16:00","18:00","20:00","22:00")
-                            val current = "${ph.toString().padStart(2,'0')}:${pm.toString().padStart(2,'0')}"
-                            val idx = times.indexOf(current)
-                            val next = if (idx >= 0 && idx < times.size - 1) times[idx + 1] else times[0]
-                            ph = next.substringBefore(":").toInt(); pm = next.substringAfter(":").toInt()
-                        }, shape = RoundedCornerShape(8.dp)) { Text("常用", fontSize = 12.sp) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("时间：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        OutlinedTextField(value = plannedTimeStr, onValueChange = { v ->
+                            val clean = v.replace(":", "")
+                            val formatted = if (clean.length == 4) "${clean.take(2)}:${clean.drop(2)}" else v
+                            if (formatted.matches(Regex("^\\d{2}:\\d{2}$"))) {
+                                val h = formatted.take(2).toIntOrNull() ?: return@OutlinedTextField; val m = formatted.drop(3).toIntOrNull() ?: return@OutlinedTextField
+                                if (h in 0..23 && m in 0..59) plannedTimeStr = formatted
+                            } else if (v.length <= 5) plannedTimeStr = v
+                        }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold), modifier = Modifier.width(100.dp), shape = RoundedCornerShape(8.dp), placeholder = { Text("HH:mm", fontSize = 14.sp) })
                     }
                 }
             }
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("取消") }
-                Button(onClick = { if (title.isNotBlank()) onSave(task.id, title.trim(), content.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, if (hasPlan) plannedDates else emptyList(), selectedPriority != task.priority, if (hasDeadline) "${dh.toString().padStart(2,'0')}:${dm.toString().padStart(2,'0')}" else null, if (hasPlan && plannedDates.isNotEmpty()) listOf("${ph.toString().padStart(2,'0')}:${pm.toString().padStart(2,'0')}") else emptyList()) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("保存") }
+                Button(onClick = { if (title.isNotBlank()) onSave(task.id, title.trim(), content.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, if (hasPlan) plannedDates else emptyList(), selectedPriority != task.priority, if (hasDeadline && deadlineTimeStr.matches(Regex("^\\d{2}:\\d{2}$"))) deadlineTimeStr else null, if (hasPlan && plannedDates.isNotEmpty() && plannedTimeStr.matches(Regex("^\\d{2}:\\d{2}$"))) listOf(plannedTimeStr) else emptyList()) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("保存") }
             }
             Spacer(Modifier.height(12.dp))
             if (deleteConfirm) { Text("确定要删除？", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium); Spacer(Modifier.height(4.dp))
