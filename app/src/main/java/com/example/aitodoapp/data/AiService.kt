@@ -25,8 +25,8 @@ import java.util.concurrent.TimeUnit
 object AiService {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
@@ -76,7 +76,7 @@ $taskList
 $tagList
 
 可用工具：
-- create_task：创建任务。参数: title(标题), priority(P0-P4), deadline(日期), tags(标签数组), content(描述), planned_dates(计划日期)
+- create_task：创建任务。参数: title(标题), priority(P0-P4), deadline(日期), deadline_time(时间), tags(标签数组), content(描述), planned_dates(计划日期)
 - complete_task：标记任务已完成。参数: title(任务标题或关键词)
 - delete_task：删除任务。参数: title(任务标题或关键词)
 - update_task：修改任务。参数: title(要修改的任务关键词), new_title(新标题), priority(新优先级), deadline(新日期), tags(新标签), planned_dates(新计划日期)
@@ -91,7 +91,7 @@ $tagList
   ⑤ 其他→create_task
 - 任务列表中标记了 [已完成] 的是已勾掉的任务，[过期] 的是已过期未完成的任务
 - 【标题精简】title 只保留任务核心名称，去掉时间词。如"明天下午开会"→"开会"，"后天交实验报告"→"交实验报告"
-- 【时间提取】从用户话中提取时间信息放到 planned_dates（计划时间）或 deadline（截止）中，不留在标题里。基于当前日期时间计算"今天/明天/后天/下周/上午/下午"等相对时间。注意：如果是考试/会议/活动等有明确时间的场景，planned_dates 和 deadline 应同时设为该日期
+- 【时间提取】从用户话中提取时间信息放到 planned_dates（计划时间）或 deadline（截止）中，不留在标题里。基于当前日期时间计算"今天/明天/后天/下周/上午/下午"等相对时间。提取具体时间时，deadline 设为 YYYY-MM-DD，deadline_time 设为 HH:mm（5分钟倍数）。注意：如果是考试/会议/活动等有明确时间的场景，planned_dates 和 deadline 应同时设为该日期
 - 【内容生成】content 字段给出任务的详细描述、做法建议、注意事项等（20-100字）
 - title 匹配时模糊匹配，如"实验"→"交大物实验报告"
 - 【计划日期】planned_dates 是用户打算在哪几天做。如"今明两天做"→[今天,明天]
@@ -115,6 +115,7 @@ $tagList
                             putJsonObject("content") { put("type", "string"); put("description", "任务详细描述、做法建议、注意事项等（可选）") }
                             putJsonObject("priority") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("P0")); add(JsonPrimitive("P1")); add(JsonPrimitive("P2")); add(JsonPrimitive("P3")); add(JsonPrimitive("P4")) }; put("description", "优先级") }
                             putJsonObject("deadline") { put("type", "string"); put("description", "截止日期 YYYY-MM-DD") }
+                            putJsonObject("deadline_time") { put("type", "string"); put("description", "截止时间 HH:mm（可选）") }
                             putJsonObject("planned_dates") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "计划在哪几天做，YYYY-MM-DD数组") }
                             putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "标签") }
                         }
@@ -223,9 +224,10 @@ $tagList
                             val c = (args["content"] as? JsonPrimitive)?.content ?: ""
                             val p = try { Priority.valueOf((args["priority"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { Priority.P3 }
                             val d = try { java.time.LocalDate.parse((args["deadline"] as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null }
+                            val dt = (args["deadline_time"] as? JsonPrimitive)?.content
                             val tags = (args["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
                             val pl = (args["planned_dates"] as? JsonArray)?.mapNotNull { try { java.time.LocalDate.parse((it as? JsonPrimitive)?.content ?: "") } catch (_: Exception) { null } } ?: emptyList()
-                            actions.add(AiAction.CreateTask(t, c, p, d, tags, pl))
+                            actions.add(AiAction.CreateTask(t, c, p, d, tags, pl, dt))
                         }
                         "complete_task" -> (args["title"] as? JsonPrimitive)?.content?.let { actions.add(AiAction.CompleteTask(it)) }
                         "delete_task" -> (args["title"] as? JsonPrimitive)?.content?.let { actions.add(AiAction.DeleteTask(it)) }
@@ -252,7 +254,7 @@ $tagList
 
 data class AiResult(val text: String, val actions: List<AiAction> = emptyList(), val promptTokens: Int = 0, val completionTokens: Int = 0)
 sealed class AiAction {
-    data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList()) : AiAction()
+    data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList(), val deadlineTime: String? = null) : AiAction()
     data class CompleteTask(val title: String) : AiAction()
     data class DeleteTask(val title: String) : AiAction()
     data class UpdateTask(val title: String, val newTitle: String?, val priority: Priority?, val deadline: java.time.LocalDate?, val tags: List<String>?, val plannedDates: List<java.time.LocalDate>? = null) : AiAction()

@@ -59,12 +59,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.setValue
 import com.example.aitodoapp.data.AiService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,7 +137,9 @@ data class Task(
     val priorityLocked: Boolean = false,
     val tags: List<String> = emptyList(),
     @Serializable(with = LocalDateListSerializer::class) val plannedDates: List<LocalDate> = emptyList(),
+    val plannedTimes: List<String> = emptyList(),  // "HH:mm" 格式，与 plannedDates 对应
     @Serializable(with = LocalDateSerializer::class) val deadline: LocalDate? = null,
+    val deadlineTime: String? = null,  // "HH:mm" 格式，5分钟精度
     val isCompleted: Boolean = false, val isArchived: Boolean = false,
     @Serializable(with = LocalDateSerializer::class) val completedAt: LocalDate? = null,
     val calendarEventId: Long? = null
@@ -149,6 +153,7 @@ class MainActivity : ComponentActivity() {
         TaskRepository.init(applicationContext)
         SettingsRepository.init(applicationContext)
         com.example.aitodoapp.data.TokenRepository.init(applicationContext)
+        com.example.aitodoapp.data.NotificationHelper.createChannel(applicationContext)
         setContent { AiTodoAppTheme { AppMain() } }
     }
 }
@@ -260,9 +265,9 @@ fun AppMain() {
     fun createTag(n: String) { val t = n.trim(); if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll() } }
     fun promoteTag(n: String) { allTags = allTags.map { if (it.name == n) it.copy(isTemporary = false) else it }; saveAll() }
     fun deleteTag(n: String) { allTags = allTags.filter { it.name != n }; tasks = tasks.map { it.copy(tags = it.tags.filter { t -> t != n }) }; saveAll() }
-    fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList()) {
+    fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList(), deadlineTime: String? = null) {
         tags.forEach { addTag(it) }
-        val newTask = Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned)
+        val newTask = Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned, deadlineTime = deadlineTime)
         tasks = listOf(newTask) + tasks
         if (settings.autoSyncCalendar && (dl != null || planned.isNotEmpty())) {
             val syncDate = dl ?: planned.first()
@@ -274,7 +279,7 @@ fun AppMain() {
         saveAll()
     }
 
-    fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false) {
+    fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList()) {
         tags.forEach { addTag(it) }
         val old = tasks.find { it.id == id }
         if (old?.deadline != dl) {
@@ -282,12 +287,12 @@ fun AppMain() {
             if (settings.autoSyncCalendar && dl != null) {
                 try {
                     val eid = com.example.aitodoapp.data.CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes)
-                    tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, plannedDates = planned, calendarEventId = eid) else it }
+                    tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
                     saveAll(); return
                 } catch (_: Exception) {}
             }
         }
-        tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, plannedDates = planned) else it }
+                    tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, plannedDates = planned, plannedTimes = plannedTimes) else it }
         saveAll()
     }
 
@@ -314,8 +319,8 @@ fun AppMain() {
         }
     }) { innerPadding ->
         when (tab) {
-            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl -> addTask(t, p, d, tags, c, pl) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk -> updateTask(id, t, c, p, d, tags, pl, lk) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage)
-            1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
+            0 -> TaskScreen(activeTasks, allTags, ::completeTask, { t, p, d, tags, c, pl, dt -> addTask(t, p, d, tags, c, pl, dt) }, ::deleteTask, { id, t, c, p, d, tags, pl, lk, dt, pt -> updateTask(id, t, c, p, d, tags, pl, lk, dt, pt) }, Modifier.padding(innerPadding), false, selectedDay, { selectedDay = it }, overdueTasks, settings.showOverdueInline, settings.longPressChat, settings.showTokenUsage)
+            1 -> TaskScreen(archivedTasks, allTags, ::unarchiveTask, { _, _, _, _, _, _, _ -> }, ::deleteTask, { _, _, _, _, _, _, _, _, _, _ -> }, Modifier.padding(innerPadding), true, DayFilter.ALL, {})
             2 -> TagManagerScreen(allTags, allActive, ::createTag, ::promoteTag, ::deleteTag, Modifier.padding(innerPadding))
             3 -> SettingsScreen(Modifier.padding(innerPadding))
         }
@@ -621,9 +626,10 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false) {
-    val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false) {
+    val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var pendingRetryInput by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // 使用 Activity 的 lifecycleScope，切后台时协程不被取消
+    val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val scope = lifecycleOwner.lifecycleScope
     val placeholders = remember { listOf("记个事...", "粘贴长文本或输入...", "告诉 AI 做什么...", "输入任务...", "试试自然语言...", "说你想做的事...") }
@@ -647,6 +653,82 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
         if (aiDoneMessage.isNotEmpty()) {
             kotlinx.coroutines.delay(5000)
             aiDoneMessage = ""
+        }
+    }
+
+    // 切后台网络失败后，回到前台自动重试
+    val retryLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(retryLifecycle, pendingRetryInput) {
+        if (pendingRetryInput.isNotEmpty()) {
+            retryLifecycle.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                val input = pendingRetryInput
+                pendingRetryInput = ""
+                // Re-send the request
+                aiLoading = true; aiReply = ""; aiStatus = "🔄 自动重试..."
+                kotlinx.coroutines.delay(500) // slight delay to ensure network is ready
+                val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
+                val taskTitles = aiTaskList.map { t ->
+                    when {
+                        t.isCompleted -> "[已完成] ${t.title}"
+                        overdueTasks.any { it.id == t.id } -> "[过期] ${t.title}"
+                        else -> t.title
+                    }
+                }
+                val tagNames = allTags.map { it.name }
+                val result = com.example.aitodoapp.data.AiService.processMessage(input, taskTitles, tagNames)
+                com.example.aitodoapp.data.TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (result.text.startsWith("网络请求失败")) {
+                        aiReply = "⚠️ 网络不可用，请稍后手动重试（输入已保留）"
+                        aiLoading = false; aiStatus = ""; return@withContext
+                    }
+                    aiReply = result.text
+                    var created = 0; var completed = 0; var deleted = 0; var updated = 0
+                    for (action in result.actions) {
+                        when (action) {
+                            is com.example.aitodoapp.data.AiAction.CreateTask -> {
+                                onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++
+                            }
+                            is com.example.aitodoapp.data.AiAction.CompleteTask -> {
+                                aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onComplete(it.id) }; completed++
+                            }
+                            is com.example.aitodoapp.data.AiAction.DeleteTask -> {
+                                aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onDelete(it.id) }; deleted++
+                            }
+                            is com.example.aitodoapp.data.AiAction.UpdateTask -> {
+                                val task = aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }
+                                if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null)) {
+                                    onUpdateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, null, emptyList()); updated++
+                                }
+                            }
+                            is com.example.aitodoapp.data.AiAction.CompletedTasks -> {
+                                val done = aiTaskList.filter { it.isCompleted }
+                                aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
+                            }
+                        }
+                    }
+                    val parts = mutableListOf<String>()
+                    val details = mutableListOf<String>()
+                    if (created > 0) { parts.add("📝添加了${created}个任务"); val a = result.actions.firstOrNull { it is com.example.aitodoapp.data.AiAction.CreateTask } as? com.example.aitodoapp.data.AiAction.CreateTask; if (a != null) { var d = a.title; if (a.deadline != null) d += " 截止${a.deadline?.format(java.time.format.DateTimeFormatter.ofPattern("M月d日")) ?: ""}"; if (a.deadlineTime != null) d += " ${a.deadlineTime}"; details.add(d) } }
+                    if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
+                    if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
+                    if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
+                    if (parts.isNotEmpty()) {
+                        aiDoneMessage = parts.joinToString(" ")
+                        val notifBody = details.filter { it.isNotBlank() }.joinToString("\n")
+                        com.example.aitodoapp.data.NotificationHelper.show(context, "AI 代办", if (notifBody.isNotBlank()) notifBody else parts.joinToString(" "))
+                    }
+                    aiLoading = false; aiStatus = ""
+                }
+            }
+        }
+    }
+
+    // AI 加载安全兜底：超过 40 秒自动重置
+    LaunchedEffect(aiLoading) {
+        if (aiLoading) {
+            kotlinx.coroutines.delay(40000)
+            aiLoading = false; aiStatus = "⚠️ 请求超时，请重试"
         }
     }
 
@@ -783,11 +865,16 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                     val result = AiService.processMessage(t, taskTitles, tagNames)
                                     com.example.aitodoapp.data.TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                     scope.launch(Dispatchers.Main) {
+                                        if (result.text.startsWith("网络请求失败")) {
+                                            pendingRetryInput = t
+                                            aiReply = "⚠️ 网络不可用，回到前台自动重试..."
+                                            aiLoading = false; aiStatus = ""; return@launch
+                                        }
                                         aiReply = result.text
                                         var created = 0; var completed = 0; var deleted = 0; var updated = 0
                                         for (action in result.actions) {
                                             when (action) {
-                                                is com.example.aitodoapp.data.AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates); created++ }
+                                                is com.example.aitodoapp.data.AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
                                                 is com.example.aitodoapp.data.AiAction.CompleteTask -> { aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onComplete(it.id) }; completed++ }
                                                 is com.example.aitodoapp.data.AiAction.DeleteTask -> { aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onDelete(it.id) }; deleted++ }
                                                 is com.example.aitodoapp.data.AiAction.UpdateTask -> {
@@ -801,7 +888,9 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                                             action.deadline ?: task.deadline,
                                                             action.tags ?: task.tags,
                                                             action.plannedDates ?: task.plannedDates,
-                                                            action.priority != null && action.priority != task.priority
+                                                            action.priority != null && action.priority != task.priority,
+                                                            null,
+                                                            emptyList()
                                                         ); updated++
                                                     }
                                                 }
@@ -812,11 +901,16 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                             }
                                         }
                                         val parts = mutableListOf<String>()
-                                        if (created > 0) parts.add("📝添加了${created}个任务")
-                                        if (completed > 0) parts.add("✅完成了${completed}个任务")
-                                        if (deleted > 0) parts.add("🗑️删除了${deleted}个任务")
-                                        if (updated > 0) parts.add("✏️修改了${updated}个任务")
-                                        if (parts.isNotEmpty()) aiDoneMessage = parts.joinToString(" ")
+                                        val details = mutableListOf<String>()
+                                        if (created > 0) { parts.add("📝添加了${created}个任务"); val a = result.actions.firstOrNull { it is com.example.aitodoapp.data.AiAction.CreateTask } as? com.example.aitodoapp.data.AiAction.CreateTask; if (a != null) { var d = a.title; if (a.deadline != null) d += " 截止${a.deadline?.format(java.time.format.DateTimeFormatter.ofPattern("M月d日")) ?: ""}"; if (a.deadlineTime != null) d += " ${a.deadlineTime}"; details.add(d) } }
+                                        if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
+                                        if (deleted > 0) { parts.add("🗑️删除了${deleted}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.DeleteTask>().firstOrNull()?.title ?: "") }
+                                        if (updated > 0) { parts.add("✏️修改了${updated}个任务"); details.add(result.actions.filterIsInstance<com.example.aitodoapp.data.AiAction.UpdateTask>().firstOrNull()?.let { "修改 ${it.title}" } ?: "") }
+                                        if (parts.isNotEmpty()) {
+                                            aiDoneMessage = parts.joinToString(" ")
+                                            val notifBody = details.filter { it.isNotBlank() }.joinToString("\n")
+                                            com.example.aitodoapp.data.NotificationHelper.show(context, "AI 代办", if (notifBody.isNotBlank()) notifBody else parts.joinToString(" "))
+                                        }
                                         aiLoading = false; aiStatus = ""
                                         chatInput = ""
                                     }
@@ -835,8 +929,8 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 }
             }
         }
-        if (showInput) AddTaskDialog(allTags, { showInput = false }) { t, p, d, tags, c, pl -> onAddTask(t, p, d, tags, c, pl); showInput = false }
-        if (editTarget != null) EditTaskDialog(editTarget!!, allTags, { editTarget = null }, { id, ti, c, p, d, tags, pl, locked -> onUpdateTask(id, ti, c, p, d, tags, pl, locked); editTarget = null }, { onDelete(editTarget!!.id); editTarget = null })
+        if (showInput) AddTaskDialog(allTags, { showInput = false }) { t, p, d, tags, c, pl, dt -> onAddTask(t, p, d, tags, c, pl, dt); showInput = false }
+        if (editTarget != null) EditTaskDialog(editTarget!!, allTags, { editTarget = null }, { id, ti, c, p, d, tags, pl, locked, dt, pt -> onUpdateTask(id, ti, c, p, d, tags, pl, locked, dt, pt); editTarget = null }, { onDelete(editTarget!!.id); editTarget = null })
     }
 }
 
@@ -918,7 +1012,7 @@ fun TagChip(name: String, isTemporary: Boolean, onDelete: () -> Unit, onClick: (
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>) -> Unit) {
+fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit) {
     var title by remember { mutableStateOf("") }; var content by remember { mutableStateOf("") }
     var selectedPriority by remember { mutableStateOf(Priority.P3) }; var hasDeadline by remember { mutableStateOf(false) }
     var deadlineDate by remember { mutableStateOf(LocalDate.now()) }; var showPriorityMenu by remember { mutableStateOf(false) }
@@ -985,7 +1079,7 @@ fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String,
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("取消") }
-                Button(onClick = { if (title.isNotBlank()) onConfirm(title.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, content.trim(), if (hasPlan) plannedDates else emptyList()) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("添加") }
+                Button(onClick = { if (title.isNotBlank()) onConfirm(title.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, content.trim(), if (hasPlan) plannedDates else emptyList(), null) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("添加") }
             }
             Spacer(Modifier.height(4.dp))
         }
@@ -1017,11 +1111,15 @@ fun AddTaskDialog(allTags: List<Tag>, onDismiss: () -> Unit, onConfirm: (String,
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun EditTaskDialog(task: Task, allTags: List<Tag>, onDismiss: () -> Unit, onSave: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean) -> Unit, onDelete: () -> Unit) {
+fun EditTaskDialog(task: Task, allTags: List<Tag>, onDismiss: () -> Unit, onSave: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, onDelete: () -> Unit) {
     var title by remember { mutableStateOf(task.title) }; var content by remember { mutableStateOf(task.content) }
     var selectedPriority by remember { mutableStateOf(task.priority) }; var hasDeadline by remember { mutableStateOf(task.deadline != null) }
     var deadlineDate by remember { mutableStateOf(task.deadline ?: LocalDate.now()) }; var showPriorityMenu by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var dh by remember { mutableStateOf(if (task.deadlineTime != null) task.deadlineTime!!.substringBefore(":").toIntOrNull() ?: 10 else 10) }
+    var dm by remember { mutableStateOf(if (task.deadlineTime != null) task.deadlineTime!!.substringAfter(":").toIntOrNull() ?: 0 else 0) }
+    var ph by remember { mutableStateOf(if (task.plannedTimes.isNotEmpty()) task.plannedTimes.first().substringBefore(":").toIntOrNull() ?: 10 else 10) }
+    var pm by remember { mutableStateOf(if (task.plannedTimes.isNotEmpty()) task.plannedTimes.first().substringAfter(":").toIntOrNull() ?: 0 else 0) }
     var hasPlan by remember { mutableStateOf(task.plannedDates.isNotEmpty()) }
     var plannedDates by remember { mutableStateOf(task.plannedDates) }; var showPlanPicker by remember { mutableStateOf(false) }
     var selectedTags by remember { mutableStateOf(task.tags) }; var tagInput by remember { mutableStateOf("") }; var showTagSuggest by remember { mutableStateOf(false) }
@@ -1070,6 +1168,14 @@ fun EditTaskDialog(task: Task, allTags: List<Tag>, onDismiss: () -> Unit, onSave
                 OutlinedButton(onClick = { showDatePicker = true }, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Text("📅 ${deadlineDate.format(DateTimeFormatter.ofPattern("M月d日  EEEE"))}", fontSize = 15.sp)
                 }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { dh = (dh + 1) % 24 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) {
+                        Text("🕐 ${dh.toString().padStart(2,'0')}:${dm.toString().padStart(2,'0')}", fontSize = 13.sp)
+                    }
+                    OutlinedButton(onClick = { dm = (dm + 5) % 60 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) { Text("分钟 +5", fontSize = 12.sp) }
+                    OutlinedButton(onClick = { dm = (dm - 5 + 60) % 60 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) { Text("分钟 -5", fontSize = 12.sp) }
+                }
             }
             Spacer(Modifier.height(12.dp))
             // 计划日期
@@ -1083,11 +1189,30 @@ fun EditTaskDialog(task: Task, allTags: List<Tag>, onDismiss: () -> Unit, onSave
                     } }
                 }
                 OutlinedButton(onClick = { showPlanPicker = true }, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) { Text("+ 选择日期", fontSize = 13.sp) }
+                if (hasPlan && plannedDates.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("时间：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { ph = (ph + 1) % 24 }, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) {
+                            Text("🕐 ${ph.toString().padStart(2,'0')}:${pm.toString().padStart(2,'0')}", fontSize = 13.sp)
+                        }
+                        OutlinedButton(onClick = { pm = (pm + 5) % 60 }, shape = RoundedCornerShape(8.dp)) { Text("+5", fontSize = 12.sp) }
+                        OutlinedButton(onClick = { pm = (pm - 5 + 60) % 60 }, shape = RoundedCornerShape(8.dp)) { Text("-5", fontSize = 12.sp) }
+                        OutlinedButton(onClick = {
+                            val times = listOf("08:00","09:00","10:00","12:00","14:00","15:00","16:00","18:00","20:00","22:00")
+                            val current = "${ph.toString().padStart(2,'0')}:${pm.toString().padStart(2,'0')}"
+                            val idx = times.indexOf(current)
+                            val next = if (idx >= 0 && idx < times.size - 1) times[idx + 1] else times[0]
+                            ph = next.substringBefore(":").toInt(); pm = next.substringAfter(":").toInt()
+                        }, shape = RoundedCornerShape(8.dp)) { Text("常用", fontSize = 12.sp) }
+                    }
+                }
             }
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("取消") }
-                Button(onClick = { if (title.isNotBlank()) onSave(task.id, title.trim(), content.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, if (hasPlan) plannedDates else emptyList(), selectedPriority != task.priority) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("保存") }
+                Button(onClick = { if (title.isNotBlank()) onSave(task.id, title.trim(), content.trim(), selectedPriority, if (hasDeadline) deadlineDate else null, selectedTags, if (hasPlan) plannedDates else emptyList(), selectedPriority != task.priority, if (hasDeadline) "${dh.toString().padStart(2,'0')}:${dm.toString().padStart(2,'0')}" else null, if (hasPlan && plannedDates.isNotEmpty()) listOf("${ph.toString().padStart(2,'0')}:${pm.toString().padStart(2,'0')}") else emptyList()) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), enabled = title.isNotBlank()) { Text("保存") }
             }
             Spacer(Modifier.height(12.dp))
             if (deleteConfirm) { Text("确定要删除？", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium); Spacer(Modifier.height(4.dp))
