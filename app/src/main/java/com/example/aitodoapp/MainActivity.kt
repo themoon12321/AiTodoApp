@@ -61,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.setValue
+import com.example.aitodoapp.data.AiAction
 import com.example.aitodoapp.data.AiService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -143,6 +144,104 @@ data class Task(
     val isCompleted: Boolean = false, val isArchived: Boolean = false,
     @Serializable(with = LocalDateSerializer::class) val completedAt: LocalDate? = null,
     val calendarEventId: Long? = null
+)
+
+// ============ 多字段匹配引擎 ============
+
+/** AI 多字段匹配条件 */
+data class MatchCriteria(
+    val keyword: String,
+    val deadline: LocalDate? = null,
+    val deadlineTime: String? = null,
+    val tags: List<String>? = null,
+    val content: String? = null,
+    val plannedDate: LocalDate? = null
+)
+
+/** 为 AI 格式化任务详情（标题 + 截止时间 + 标签 + 计划日期 + 内容摘要） */
+private fun formatTaskForAi(task: Task, today: LocalDate = LocalDate.now()): String {
+    val parts = mutableListOf(task.title)
+    if (task.deadline != null) {
+        val dStr = task.deadline.format(DateTimeFormatter.ofPattern("M/d"))
+        val tStr = task.deadlineTime?.let { " $it" } ?: ""
+        parts.add("截止:$dStr$tStr")
+    }
+    if (task.tags.isNotEmpty()) parts.add("🏷${task.tags.joinToString(",")}")
+    if (task.plannedDates.isNotEmpty()) {
+        val pd = task.plannedDates.sorted().joinToString(",") { it.format(DateTimeFormatter.ofPattern("M/d")) }
+        parts.add("📍$pd")
+    }
+    if (task.content.isNotBlank()) {
+        parts.add("💬${task.content.take(20)}${if (task.content.length > 20) "…" else ""}")
+    }
+    return parts.joinToString(" | ")
+}
+
+/** 基于多字段评分找最佳匹配任务。返回 null 表示无匹配或歧义。 */
+private fun findBestMatch(tasks: List<Task>, criteria: MatchCriteria): Task? {
+    val kw = criteria.keyword.trim()
+    data class Scored(val task: Task, val score: Int)
+
+    val scored = tasks.mapNotNull { task ->
+        var score = 0
+
+        // 标题关键词匹配（核心，权重 50）
+        if (kw.isNotBlank()) {
+            if (task.title.contains(kw, ignoreCase = true)) score += 50
+            else if (kw.contains(task.title, ignoreCase = true)) score += 30
+            // 关键词反向匹配内容作为补充
+            if (task.content.contains(kw, ignoreCase = true)) score += 10
+        }
+
+        // 截止日期精确匹配（权重 30）
+        if (criteria.deadline != null && task.deadline == criteria.deadline) score += 30
+
+        // 截止时间精确匹配（权重 20）
+        if (criteria.deadlineTime != null && task.deadlineTime == criteria.deadlineTime) score += 20
+
+        // 标签重叠（权重 20）
+        if (criteria.tags != null && criteria.tags.isNotEmpty()) {
+            val matchCnt = criteria.tags.count { mt -> task.tags.any { taskTag -> taskTag.contains(mt, ignoreCase = true) } }
+            if (matchCnt > 0) score += 20
+        }
+
+        // 内容关键词匹配（权重 15）
+        if (criteria.content != null && criteria.content.isNotBlank() && task.content.contains(criteria.content, ignoreCase = true)) score += 15
+
+        // 计划日期精确匹配（权重 25）
+        if (criteria.plannedDate != null && task.plannedDates.any { it == criteria.plannedDate }) score += 25
+
+        if (score <= 0) null else Scored(task, score)
+    }
+
+    if (scored.isEmpty()) return null
+
+    val maxScore = scored.maxOf { it.score }
+    val best = scored.filter { it.score == maxScore }
+
+    // 平局时尝试用精确标题匹配打破僵局
+    if (best.size > 1) {
+        val exact = best.filter {
+            it.task.title.equals(kw, ignoreCase = true) || kw.equals(it.task.title, ignoreCase = true)
+        }
+        return if (exact.size == 1) exact[0].task else null // 仍有歧义 → 不操作
+    }
+
+    return best[0].task
+}
+
+/** AiAction → MatchCriteria 转换 */
+private fun AiAction.CompleteTask.toMatchCriteria() = MatchCriteria(
+    keyword = title, deadline = deadline, deadlineTime = deadlineTime,
+    tags = tags, content = content, plannedDate = plannedDate
+)
+private fun AiAction.DeleteTask.toMatchCriteria() = MatchCriteria(
+    keyword = title, deadline = deadline, deadlineTime = deadlineTime,
+    tags = tags, content = content, plannedDate = plannedDate
+)
+private fun AiAction.UpdateTask.toMatchCriteria() = MatchCriteria(
+    keyword = title, deadline = matchDeadline, deadlineTime = matchDeadlineTime,
+    tags = matchTags, content = matchContent, plannedDate = matchPlannedDate
 )
 
 // ============ 主 Activity ============
@@ -667,15 +766,16 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 aiLoading = true; aiReply = ""; aiStatus = "🔄 自动重试..."
                 kotlinx.coroutines.delay(500) // slight delay to ensure network is ready
                 val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
-                val taskTitles = aiTaskList.map { t ->
-                    when {
-                        t.isCompleted -> "[已完成] ${t.title}"
-                        overdueTasks.any { it.id == t.id } -> "[过期] ${t.title}"
-                        else -> t.title
+                val taskDescriptions = aiTaskList.map { t ->
+                    val prefix = when {
+                        t.isCompleted -> "[已完成] "
+                        overdueTasks.any { it.id == t.id } -> "[过期] "
+                        else -> ""
                     }
+                    prefix + formatTaskForAi(t, today)
                 }
                 val tagNames = allTags.map { it.name }
-                val result = com.example.aitodoapp.data.AiService.processMessage(input, taskTitles, tagNames)
+                val result = com.example.aitodoapp.data.AiService.processMessage(input, taskDescriptions, tagNames)
                 com.example.aitodoapp.data.TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                 withContext(kotlinx.coroutines.Dispatchers.Main) {
                     if (result.text.startsWith("网络请求失败")) {
@@ -690,15 +790,15 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                 onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++
                             }
                             is com.example.aitodoapp.data.AiAction.CompleteTask -> {
-                                aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onComplete(it.id) }; completed++
+                                findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onComplete(it.id) }; completed++
                             }
                             is com.example.aitodoapp.data.AiAction.DeleteTask -> {
-                                aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onDelete(it.id) }; deleted++
+                                findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onDelete(it.id) }; deleted++
                             }
                             is com.example.aitodoapp.data.AiAction.UpdateTask -> {
-                                val task = aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }
-                                if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null)) {
-                                    onUpdateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, null, emptyList()); updated++
+                                val task = findBestMatch(aiTaskList, action.toMatchCriteria())
+                                if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
+                                    onUpdateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, action.deadlineTime, action.plannedTimes ?: emptyList()); updated++
                                 }
                             }
                             is com.example.aitodoapp.data.AiAction.CompletedTasks -> {
@@ -854,15 +954,16 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
-                                    val taskTitles = aiTaskList.map { t ->
-                                        when {
-                                            t.isCompleted -> "[已完成] ${t.title}"
-                                            overdueTasks.any { it.id == t.id } -> "[过期] ${t.title}"
-                                            else -> t.title
+                                    val taskDescriptions = aiTaskList.map { t ->
+                                        val prefix = when {
+                                            t.isCompleted -> "[已完成] "
+                                            overdueTasks.any { it.id == t.id } -> "[过期] "
+                                            else -> ""
                                         }
+                                        prefix + formatTaskForAi(t, today)
                                     }
                                     val tagNames = allTags.map { it.name }
-                                    val result = AiService.processMessage(t, taskTitles, tagNames)
+                                    val result = AiService.processMessage(t, taskDescriptions, tagNames)
                                     com.example.aitodoapp.data.TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                     scope.launch(Dispatchers.Main) {
                                         if (result.text.startsWith("网络请求失败")) {
@@ -875,11 +976,11 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                         for (action in result.actions) {
                                             when (action) {
                                                 is com.example.aitodoapp.data.AiAction.CreateTask -> { onAddTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime); created++ }
-                                                is com.example.aitodoapp.data.AiAction.CompleteTask -> { aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onComplete(it.id) }; completed++ }
-                                                is com.example.aitodoapp.data.AiAction.DeleteTask -> { aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }?.let { onDelete(it.id) }; deleted++ }
+                                                is com.example.aitodoapp.data.AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onComplete(it.id) }; completed++ }
+                                                is com.example.aitodoapp.data.AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { onDelete(it.id) }; deleted++ }
                                                 is com.example.aitodoapp.data.AiAction.UpdateTask -> {
-                                                    val task = aiTaskList.find { it.title.contains(action.title, true) || action.title.contains(it.title, true) }
-                                                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null)) {
+                                                    val task = findBestMatch(aiTaskList, action.toMatchCriteria())
+                                                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
                                                         onUpdateTask(
                                                             task.id,
                                                             action.newTitle ?: task.title,
@@ -889,8 +990,8 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                                                             action.tags ?: task.tags,
                                                             action.plannedDates ?: task.plannedDates,
                                                             action.priority != null && action.priority != task.priority,
-                                                            null,
-                                                            emptyList()
+                                                            action.deadlineTime,
+                                                            action.plannedTimes ?: emptyList()
                                                         ); updated++
                                                     }
                                                 }
