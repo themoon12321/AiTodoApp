@@ -84,11 +84,10 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
     var showReportView by remember { mutableStateOf(false) }; var reportLoading by remember { mutableStateOf(false) }
     var reports by remember { mutableStateOf(ReportRepository.load()) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    // 从通知点击打开播报页
+    // 从通知点击打开播报页（不在 LaunchedEffect 内清除 trigger，避免 cancel）
     LaunchedEffect(openReportTrigger) {
         if (openReportTrigger) {
             showReportView = true
-            onClearReportTrigger()
         }
     }
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -386,6 +385,7 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 ReportRepository.markRead()
                 reports = ReportRepository.load()
                 showReportView = false
+                onClearReportTrigger()
             })
         }
     }
