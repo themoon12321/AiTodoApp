@@ -373,26 +373,7 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                         } catch (_: Exception) {}
                     }
                 }, onScheduleReport = { isMorning ->
-                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        kotlinx.coroutines.delay(60000)
-                        try {
-                            val aiTasks = (tasks + overdueTasks).distinctBy { it.id }
-                            val descs = aiTasks.map { t ->
-                                val p = when { t.isCompleted -> "[已完成] "; overdueTasks.any { o -> o.id == t.id } -> "[过期] "; else -> "" }
-                                p + formatTaskForAi(t, today)
-                            }
-                            val tags = allTags.map { it.name }
-                            val result = AiService.generateDailyReport(descs, tags, isMorning)
-                            if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
-                                val entry = ReportEntry(result.text, isMorning, today.toString())
-                                ReportRepository.addReport(entry)
-                                val pi = com.example.aitodoapp.data.NotificationHelper.reportPendingIntent(context)
-                                com.example.aitodoapp.data.NotificationHelper.showWithIntent(context,
-                                    if (isMorning) "🌅 早间播报已送达" else "🌙 晚间播报已送达",
-                                    "点击查看今日播报详情", pi)
-                            }
-                        } catch (_: Exception) {}
-                    }
+                    com.example.aitodoapp.data.ReportWorker.schedule(context, isMorning, 1)
                 })
         }
     }
