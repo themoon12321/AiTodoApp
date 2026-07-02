@@ -34,16 +34,5 @@ fun ReportBadge(
         contentAlignment = Alignment.Center
     ) {
         Text("📋", fontSize = 16.sp)
-        // 未读红点
-        if (hasUnread) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 2.dp, end = 2.dp)
-                    .size(9.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE53935))
-            )
-        }
     }
 }
