@@ -42,7 +42,7 @@ import com.example.aitodoapp.ui.components.CalendarTestDialog
 // ============ 设置页 ============
 
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Unit)? = null, onScheduleReport: ((Boolean) -> Unit)? = null) {
+fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Unit)? = null, onScheduleReport: ((Boolean) -> Unit)? = null, onScheduleDaily: ((isMorning: Boolean, hour: Int, minute: Int) -> Unit)? = null) {
     val s = remember { mutableStateOf(SettingsRepository.load()) }
     var apiUrl by remember { mutableStateOf(s.value.apiUrl) }
     var apiKey by remember { mutableStateOf(s.value.apiKey) }
@@ -163,13 +163,29 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         }
         if (reportEnabled) {
             Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("早间播报时间", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text(s.value.morningReportTime, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("早间播报", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeAddHour(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+1h", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeSubHour(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-1h", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeAddMin(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+5m", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { s.value = s.value.copy(morningReportTime = timeSubMin(s.value.morningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-5m", fontSize = 12.sp) }
+                Spacer(Modifier.width(8.dp))
+                Text(s.value.morningReportTime, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             }
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("晚间播报时间", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text(s.value.eveningReportTime, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("晚间播报", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeAddHour(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+1h", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeSubHour(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-1h", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeAddMin(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("+5m", fontSize = 12.sp) }
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = { s.value = s.value.copy(eveningReportTime = timeSubMin(s.value.eveningReportTime)) }, shape = RoundedCornerShape(8.dp)) { Text("-5m", fontSize = 12.sp) }
+                Spacer(Modifier.width(8.dp))
+                Text(s.value.eveningReportTime, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -212,9 +228,42 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
-        Button(onClick = { SettingsRepository.save(SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)); saved = true },
-            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("保存") }
+        Button(onClick = {
+            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)
+            SettingsRepository.save(newSettings)
+            if (reportEnabled && onScheduleDaily != null) {
+                val mh = s.value.morningReportTime.substringBefore(":").toIntOrNull() ?: 7
+                val mm = s.value.morningReportTime.substringAfter(":").toIntOrNull() ?: 0
+                val eh = s.value.eveningReportTime.substringBefore(":").toIntOrNull() ?: 21
+                val em = s.value.eveningReportTime.substringAfter(":").toIntOrNull() ?: 0
+                onScheduleDaily(true, mh, mm)
+                onScheduleDaily(false, eh, em)
+            }
+            saved = true
+        }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("保存") }
         if (showCalendarTest) CalendarTestDialog(onDismiss = { showCalendarTest = false })
         if (saved) { Spacer(Modifier.height(8.dp)); Text("✓ 已保存", color = MaterialTheme.colorScheme.primary) }
     }
+}
+
+// ──── 时间调整辅助函数 ────
+private fun timeAddHour(t: String): String {
+    val h = (t.substringBefore(":").toIntOrNull() ?: 0).let { if (it + 1 >= 24) 0 else it + 1 }
+    val m = t.substringAfter(":").toIntOrNull() ?: 0
+    return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
+}
+private fun timeSubHour(t: String): String {
+    val h = (t.substringBefore(":").toIntOrNull() ?: 0).let { if (it - 1 < 0) 23 else it - 1 }
+    val m = t.substringAfter(":").toIntOrNull() ?: 0
+    return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
+}
+private fun timeAddMin(t: String): String {
+    val h = t.substringBefore(":").toIntOrNull() ?: 0
+    val m = (t.substringAfter(":").toIntOrNull() ?: 0).let { if (it + 5 >= 60) 0 else it + 5 }
+    return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
+}
+private fun timeSubMin(t: String): String {
+    val h = t.substringBefore(":").toIntOrNull() ?: 0
+    val m = (t.substringAfter(":").toIntOrNull() ?: 0).let { if (it - 5 < 0) 55 else it - 5 }
+    return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
 }

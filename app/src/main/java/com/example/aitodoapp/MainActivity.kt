@@ -375,6 +375,8 @@ fun AppMain(openReportTrigger: Boolean = false, onClearReportTrigger: () -> Unit
                     }
                 }, onScheduleReport = { isMorning ->
                     com.example.aitodoapp.data.ReportWorker.schedule(context, isMorning, 1)
+                }, onScheduleDaily = { isMorning, hour, minute ->
+                    com.example.aitodoapp.data.ReportWorker.scheduleDaily(context, isMorning, hour, minute)
                 })
         }
     }
