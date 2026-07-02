@@ -146,6 +146,34 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(24.dp))
 
+        // ──── 早晚间播报 ────
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(" 早晚间播报 ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+        Spacer(Modifier.height(16.dp))
+        var reportEnabled by remember { mutableStateOf(s.value.reportEnabled) }
+        Row(Modifier.fillMaxWidth().clickable { reportEnabled = !reportEnabled }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("启用播报", style = MaterialTheme.typography.bodyMedium)
+                Text("AI 每日生成早晚间代办报告", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = reportEnabled, onCheckedChange = { reportEnabled = it })
+        }
+        if (reportEnabled) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("早间播报时间", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(s.value.morningReportTime, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("晚间播报时间", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(s.value.eveningReportTime, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+
         // ──── 数据统计 ────
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -170,7 +198,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         Button(onClick = { showCalendarTest = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("测试日历写入") }
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
-        Button(onClick = { SettingsRepository.save(SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind)); saved = true },
+        Button(onClick = { SettingsRepository.save(SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)); saved = true },
             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("保存") }
         if (showCalendarTest) CalendarTestDialog(onDismiss = { showCalendarTest = false })
         if (saved) { Spacer(Modifier.height(8.dp)); Text("✓ 已保存", color = MaterialTheme.colorScheme.primary) }

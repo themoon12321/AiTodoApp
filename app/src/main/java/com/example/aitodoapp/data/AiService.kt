@@ -46,6 +46,21 @@ object AiService {
         return parseResponse(responseBody)
     }
 
+    fun generateDailyReport(currentTasks: List<String>, currentTags: List<String>, isMorning: Boolean): AiResult {
+        val settings = SettingsRepository.load()
+        if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key")
+
+        val taskList = currentTasks.joinToString("\n") { "- $it" }.ifEmpty { "（暂无任务）" }
+        val tagList = currentTags.joinToString("\n") { "- $it" }.ifEmpty { "（暂无标签）" }
+
+        val requestJson = buildReportRequestJson(isMorning, taskList, tagList, settings.model)
+        val responseBody = httpPost(settings.apiUrl, settings.apiKey, requestJson)
+            ?: return AiResult("网络请求失败，检查网络连接和 API 设置")
+
+        val result = parseResponse(responseBody)
+        return result.copy(text = result.text.ifEmpty { "生成失败，请重试" })
+    }
+
     private fun httpPost(url: String, apiKey: String, jsonBody: String): String? {
         return try {
             val response = client.newCall(Request.Builder().url(url)
@@ -302,6 +317,56 @@ $tagList
             put("tool_choice", "auto")
         }
 
+        return json.encodeToString(requestBody)
+    }
+
+    /** 生成日报时用独立的 system prompt（不带工具定义，纯文本生成） */
+    private fun buildReportRequestJson(isMorning: Boolean, taskList: String, tagList: String, model: String): String {
+        val now = java.time.LocalDateTime.now()
+        val today = now.toLocalDate()
+        val dayNames = arrayOf("", "一", "二", "三", "四", "五", "六", "日")
+        val dayOfWeekChinese = dayNames[today.dayOfWeek.value]
+        val period = if (isMorning) "早间" else "晚间"
+        val emoji = if (isMorning) "🌅" else "🌙"
+
+        val systemPrompt = """你是一个温暖的 AI 代办助手。根据用户当前的任务列表，用自然语言生成一份【${period}播报】。
+格式严格参考下面的模板，不要使用纯 markdown 标记，用 emoji 和换行表达结构。
+
+模板格式（${emoji} ${period}代办报告）：
+${emoji} ${period}代办报告 · ${today}（星期$dayOfWeekChinese）
+
+📋 今日待办提醒
+- 任务标题 | 截止: M月d日 | 优先级: PX | 标签: xx
+（逐条列出今天的待办，含截止日期和优先级）
+
+💡 本日贴士
+📌 今日重点：（总结今天最重要的1-2件事）
+⏰ 时间分配建议：（按时间段给出建议）
+🌟 温馨提示：（一句鼓励的话）
+💬 （一句温暖的早安/晚安问候）
+
+规则：
+- 标题用 "${emoji} ${period}代办报告"
+- 每个 section 用 emoji 作为视觉分隔
+- 任务较多时只列出最关键的前5项
+- 时间分配建议按时间段给出，如"上午/下午/晚间"
+- 语气温暖、鼓励、带情绪价值
+- 最后一句问候要自然有温度
+
+当前任务列表：
+$taskList
+
+现有标签：
+$tagList
+""".trimIndent()
+
+        val requestBody = buildJsonObject {
+            put("model", model)
+            putJsonArray("messages") {
+                addJsonObject { put("role", "system"); put("content", systemPrompt) }
+                addJsonObject { put("role", "user"); put("content", "请根据当前任务生成${period}播报") }
+            }
+        }
         return json.encodeToString(requestBody)
     }
 

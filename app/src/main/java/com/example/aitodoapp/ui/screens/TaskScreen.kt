@@ -67,6 +67,7 @@ import com.example.aitodoapp.data.TokenRepository
 import com.example.aitodoapp.data.toMatchCriteria
 import com.example.aitodoapp.ui.components.AddTaskDialog
 import com.example.aitodoapp.ui.components.EditTaskDialog
+import com.example.aitodoapp.ui.components.ReportCard
 import com.example.aitodoapp.ui.components.TaskItem
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -75,6 +76,8 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Unit, onAddTask: (String, Priority, LocalDate?, List<String>, String, List<LocalDate>, String?) -> Unit, onDelete: (String) -> Unit, onUpdateTask: (String, String, String, Priority, LocalDate?, List<String>, List<LocalDate>, Boolean, String?, List<String>) -> Unit, modifier: Modifier, isArchive: Boolean, selectedDay: DayFilter = DayFilter.ALL, onSelectDay: (DayFilter) -> Unit = {}, overdueTasks: List<Task> = emptyList(), showOverdueSection: Boolean = true, longPressChat: Boolean = true, showTokenUsage: Boolean = false, onUpdateSettings: (SettingsRepository.Settings) -> Unit = {}, onTagAction: (action: String, tagName: String) -> Unit = { _, _ -> }, onArchiveToggle: (taskId: String, archive: Boolean) -> Unit = { _, _ -> }) {
     val today = LocalDate.now(); var showInput by remember { mutableStateOf(false) }; var chatMode by remember { mutableStateOf(false) }; var chatInput by remember { mutableStateOf("") }; var editTarget by remember { mutableStateOf<Task?>(null) }; var aiReply by remember { mutableStateOf("") }; var aiLoading by remember { mutableStateOf(false) }; var aiStatus by remember { mutableStateOf("") }; var aiDoneMessage by remember { mutableStateOf("") }; var pendingRetryInput by remember { mutableStateOf("") }; var chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // 播报状态
+    var reportMorning by remember { mutableStateOf("") }; var reportEvening by remember { mutableStateOf("") }; var reportLoading by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val scope = lifecycleOwner.lifecycleScope
@@ -223,6 +226,38 @@ fun TaskScreen(tasks: List<Task>, allTags: List<Tag>, onComplete: (String) -> Un
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(aiDoneMessage, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
+            }
+            // 播报卡片（仅非归档模式显示）
+            if (!isArchive) {
+                ReportCard(
+                    reportText = reportMorning,
+                    isLoading = reportLoading,
+                    isMorning = true,
+                    onGenerate = {
+                        reportLoading = true
+                        val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
+                        val taskDescs = aiTaskList.map { t ->
+                            val prefix = when {
+                                t.isCompleted -> "[已完成] "
+                                overdueTasks.any { it.id == t.id } -> "[过期] "
+                                else -> ""
+                            }
+                            prefix + formatTaskForAi(t, today)
+                        }
+                        val tagNames = allTags.map { it.name }
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                val result = AiService.generateDailyReport(taskDescs, tagNames, true)
+                                scope.launch(Dispatchers.Main) {
+                                    reportMorning = result.text
+                                    reportLoading = false
+                                }
+                            } catch (_: Exception) {
+                                scope.launch(Dispatchers.Main) { reportLoading = false }
+                            }
+                        }
+                    }
+                )
             }
             // 日期筛选芯片
             if (!isArchive) {
