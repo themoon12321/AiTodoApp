@@ -239,6 +239,48 @@ com.example.aitodoapp/
 - `data` 层不依赖 UI
 - 新增功能：在对应目录加文件即可
 
+## 2026-07-03（大规模迭代）：播报系统 + 归档重构 + 日历时间 + 代码审查 + 可编辑时长
+
+### 新增功能
+- **早晚间播报系统**：
+  - ReportBadge 小图标（右上角📋+未读红点）
+  - ReportViewScreen 全屏播报页（上下翻页历史记录）
+  - ReportEntry 持久化 + ReportRepository（保留30天）
+  - WorkManager 定时调度（自调度模式，执行完续期明天）
+  - 通知点击直达播报页（PendingIntent + onNewIntent）
+  - 设置页播报配置（启用/时间 HH:mm 输入框）
+  - AI 生成日报（独立 prompt）
+- **归档系统重构**：
+  - ArchiveScreen 按 completedAt 日期分组（yyyy年M月d日）
+  - 可折叠日期组，恢复/删除均需二级确认
+  - Task 软删除（isDeleted/deletedAt，30天自动清理）
+  - Settings 最近删除弹窗
+- **日历事件优化**：
+  - CalendarSyncHelper 支持计时事件（非全天）
+  - AI 语义推断时间（上午→9点、中午→11点、下午→14点、晚上→18点）
+  - AI 估算任务时长，写入日历
+  - Settings 默认时长设置
+- **可编辑任务时长**：
+  - EditTaskDialog 新增时长输入框
+  - 标签区分：截止时间 / 计划时间
+
+### 修复
+- 通知 ID 冲突（AtomicInteger）
+- 备份文件名冲突
+- GlobalScope → rememberCoroutineScope
+- AI 动作逻辑提取 processAiResult()
+- TaskItem 长按编辑修复
+- AI 归档日期参数 completed_at
+- 状态栏重叠
+- @Immutable + 过滤缓存
+
+### 待优化清单
+1. **语音入口不可用**：系统语音识别在 OPPO 被拦截
+2. **午夜自动归档未实现**：仅在 App 启动时归档一次
+3. **上下文多轮对话**：用户已提需求，待设计
+4. **用户画像**：AI 自主学习用户习惯
+5. **ViewModel 重构**：当前 callback 链加参数需改 5 个文件
+
 ## 常用命令
 
 ```bash
