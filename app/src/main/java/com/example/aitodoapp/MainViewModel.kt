@@ -89,13 +89,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initialized = true
         var changed = false
         if (tasks.isEmpty()) {
-            tasks = listOf(
-                Task(title = "交大物实验报告", priority = Priority.P0, tags = listOf("大物", "实验报告"), deadline = today),
-                Task(title = "洗衣服", priority = Priority.P2, deadline = today.minusDays(1)),
-                Task(title = "看那篇文献", priority = Priority.P3, tags = listOf("文献"), deadline = today.plusDays(3)),
-                Task(title = "买数据线", priority = Priority.P4),
-                Task(title = "机械建模作业", priority = Priority.P1, tags = listOf("建模"), deadline = today.plusDays(1)),
-            ); changed = true
+            // 首次启动无默认任务
         } else {
             tasks = tasks.map { t ->
                 var nt = t
@@ -110,8 +104,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         if (allTags.isEmpty()) {
-            allTags = listOf(Tag("大物", false), Tag("实验报告", false), Tag("文献", false), Tag("建模", false), Tag("英语", false), Tag("高数", false))
-            changed = true
+            // 首次启动无默认标签
         }
         if (changed) saveAll()
         if (settings.autoSyncCalendar) {
