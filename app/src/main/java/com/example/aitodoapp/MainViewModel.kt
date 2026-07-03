@@ -39,7 +39,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    val activeTasks get() = when (selectedDay) {
+    val activeTasks get() = sortTasks(when (selectedDay) {
         DayFilter.OVERDUE -> allActive.filter { it.deadline != null && it.deadline < today && !it.isCompleted }
         DayFilter.ALL -> allActive
         DayFilter.TODAY -> allActive.filter {
@@ -54,10 +54,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 (it.plannedDates.isEmpty() && it.createdAt <= d && (it.deadline == null || it.deadline >= d))
             }
         }
-    }
+    })
 
     val archivedTasks get() = tasks.filter { it.isArchived && !it.isDeleted }
     val deletedTasks get() = tasks.filter { it.isDeleted }.sortedByDescending { it.deletedAt ?: it.createdAt }
+
+    // ===== 排序方法 =====
+
+    private fun sortTasks(list: List<Task>): List<Task> {
+        return when (settings.taskSortOrder) {
+            "deadline" -> list.sortedBy { it.deadline?.toEpochDay() ?: Long.MAX_VALUE }
+            "priority" -> list.sortedBy { it.priority.ordinal }
+            "created" -> list.sortedByDescending { it.createdAt.toEpochDay() }
+            "manual" -> {
+                val ids = tasks.map { it.id }.withIndex().associate { (i, id) -> id to i }
+                list.filter { !it.isCompleted }.sortedBy { ids[it.id] ?: 0 } +
+                list.filter { it.isCompleted }.sortedBy { ids[it.id] ?: 0 }
+            }
+            else -> list
+        }
+    }
 
     // ===== 内部方法 =====
 
@@ -147,7 +163,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
         }
         tasks = tasks.map { if (it.id == id) { if (it.isCompleted) it.copy(isCompleted = false, completedAt = null, calendarEventId = null) else it.copy(isCompleted = true, completedAt = today) } else it }
-            .let { it.filter { !it.isCompleted } + it.filter { it.isCompleted } }
         if (wasCompleted && settings.autoSyncCalendar) {
             val updated = tasks.find { it.id == id }
             if (updated != null && (updated.deadline != null || updated.plannedDates.isNotEmpty())) {

@@ -60,6 +60,7 @@ object SettingsRepository {
         val autoSyncCalendar: Boolean = false,
         val defaultReminderMinutes: Int = 30,
         val defaultDurationMinutes: Int = 60,
+        val taskSortOrder: String = "manual",
         val reportEnabled: Boolean = false,
         val morningReportTime: String = "07:00",
         val eveningReportTime: String = "21:00"

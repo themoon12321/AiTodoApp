@@ -124,6 +124,17 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             Switch(checked = showToken, onCheckedChange = { showToken = it })
         }
         Spacer(Modifier.height(12.dp))
+        val sortLabels = mapOf("manual" to "不排序", "deadline" to "截止时间", "priority" to "优先级", "created" to "创建时间")
+        var sortOrder by remember { mutableStateOf(s.value.taskSortOrder) }
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("任务排序", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = {
+                val keys = listOf("manual", "deadline", "priority", "created")
+                val idx = keys.indexOf(sortOrder)
+                sortOrder = keys[(idx + 1) % keys.size]
+            }, shape = RoundedCornerShape(8.dp)) { Text(sortLabels[sortOrder] ?: "不排序", fontSize = 13.sp) }
+        }
+        Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().clickable { autoSync = !autoSync }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text("自动同步日历", style = MaterialTheme.typography.bodyMedium)
@@ -282,7 +293,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
         Button(onClick = {
-            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, s.value.defaultDurationMinutes, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)
+            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, s.value.defaultDurationMinutes, sortOrder, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)
             SettingsRepository.save(newSettings)
             if (reportEnabled && onScheduleDaily != null) {
                 val mh = s.value.morningReportTime.substringBefore(":").toIntOrNull() ?: 7
