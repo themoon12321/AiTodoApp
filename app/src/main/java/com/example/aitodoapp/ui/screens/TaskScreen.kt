@@ -294,7 +294,7 @@ fun TaskScreen(
             }
             val inlineOverdue = selectedDay == DayFilter.TODAY && overdueTasks.isNotEmpty() && !settings.showOverdueInline
             val displayTasks = if (inlineOverdue) tasks.filter { !it.isCompleted } + overdueTasks + tasks.filter { it.isCompleted } else tasks
-            if (displayTasks.isEmpty() && overdueTasks.isEmpty()) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Text(if (selectedDay == DayFilter.OVERDUE) "没有过期任务" else if (selectedDay == DayFilter.TODAY) "今天没有任务" else "还没有任务", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (displayTasks.isEmpty() && overdueTasks.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(if (selectedDay == DayFilter.OVERDUE) "没有过期任务" else if (selectedDay == DayFilter.TODAY) "今天没有任务" else "还没有任务", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             else {
                 Column(Modifier.weight(1f)) {
                     LazyColumn(Modifier.weight(1f)) { items(displayTasks, key = { it.id }) { task -> TaskItem(task, false, { viewModel.completeTask(task.id) }, { editTarget = task }); HorizontalDivider(Modifier.padding(start = 72.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)) } }
