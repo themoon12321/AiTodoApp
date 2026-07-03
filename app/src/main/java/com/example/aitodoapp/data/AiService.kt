@@ -117,6 +117,7 @@ $tagList
 - 【内容生成】content 字段给出任务的详细描述、做法建议、注意事项等（20-100字）
 - 【多字段精确匹配】标题相似时用 deadline/tags/content/planned_date 精确定位。用户提到时间/标签/内容时填入对应参数
 - 【计划日期】planned_dates 是用户打算在哪几天做。如"今明两天做"→[今天,明天]
+- 【时长规则】estimated_minutes=0 表示截止时间点（日历显示短标记）；>0 才是实际要做多久
 - 【优先级多维度判断】综合考虑：时间紧迫度(40%)+用户语气(20%)+任务性质(20%)
 - 【标签策略】优先选现有标签，最多创建1-2个有分类价值的临时标签
 - 【不要反问】信息不全直接做，缺的字段不填，一次完成。尤其是用户粘贴一段文字过来时，直接当做任务创建，不要问"是否需要添加"
@@ -138,7 +139,7 @@ $tagList
                             putJsonObject("priority") { put("type", "string"); putJsonArray("enum") { add(JsonPrimitive("P0")); add(JsonPrimitive("P1")); add(JsonPrimitive("P2")); add(JsonPrimitive("P3")); add(JsonPrimitive("P4")) }; put("description", "优先级") }
                             putJsonObject("deadline") { put("type", "string"); put("description", "截止日期 YYYY-MM-DD") }
                             putJsonObject("deadline_time") { put("type", "string"); put("description", "截止时间 HH:mm（可选，根据语义推断：上午→09:00、中午→11:00、下午→14:00、晚上→18:00）") }
-                            putJsonObject("estimated_minutes") { put("type", "integer"); put("description", "预估耗时分钟（可选，AI根据任务内容估算：写实验报告120、买菜30、开会60）") }
+                            putJsonObject("estimated_minutes") { put("type", "integer"); put("description", "预估耗时分钟（可选。0=截止标记；>0=实际时长，写报告120、买菜30、开会60）") }
                             putJsonObject("planned_dates") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "计划在哪几天做，YYYY-MM-DD数组") }
                             putJsonObject("tags") { put("type", "array"); putJsonObject("items") { put("type", "string") }; put("description", "标签") }
                         }

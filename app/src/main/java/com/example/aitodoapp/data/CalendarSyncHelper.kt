@@ -53,17 +53,15 @@ object CalendarSyncHelper {
         return eventId
     }
 
-    /** 创建计时事件（指定开始时间和持续分钟，跨天自动截断到15分钟） */
+    /** 创建计时事件（duration<=0 展示为 15 分钟短事件标记，自动防跨天） */
     private fun insertTimedEvent(context: Context, title: String, date: LocalDate, time: LocalTime, durationMinutes: Int, calId: Long, reminderMinutes: Int): Long? {
         val startDateTime = ZonedDateTime.of(date, time, systemZone)
-        var endDateTime = startDateTime.plusMinutes(durationMinutes.toLong())
+        val effectiveMinutes = if (durationMinutes <= 0) 15 else durationMinutes
+        val endDateTime = startDateTime.plusMinutes(effectiveMinutes.toLong())
         val dayEnd = startDateTime.toLocalDate().atTime(java.time.LocalTime.MAX).atZone(systemZone)
-        // 防止跨天：如果结束时间超过当天 23:59，截断为 15 分钟短事件
-        if (endDateTime.isAfter(dayEnd)) {
-            endDateTime = startDateTime.plusMinutes(15)
-        }
+        val actualEnd = if (endDateTime.isAfter(dayEnd)) startDateTime.plusMinutes(15) else endDateTime
         val startMillis = startDateTime.toInstant().toEpochMilli()
-        val endMillis = endDateTime.toInstant().toEpochMilli()
+        val endMillis = actualEnd.toInstant().toEpochMilli()
         val values = ContentValues().apply {
             put(CalendarContract.Events.DTSTART, startMillis)
             put(CalendarContract.Events.DTEND, endMillis)
