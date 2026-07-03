@@ -29,7 +29,7 @@ object AiService {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = false }
     private val mediaType = "application/json".toMediaType()
 
     fun processMessage(userMessage: String, currentTasks: List<String> = emptyList(), currentTags: List<String> = emptyList()): AiResult {

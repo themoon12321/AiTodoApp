@@ -10,6 +10,7 @@ object TaskRepository {
 
     @PublishedApi internal val json = Json {
         ignoreUnknownKeys = true
+        coerceInputValues = true
         prettyPrint = true
     }
 

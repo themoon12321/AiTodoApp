@@ -10,7 +10,7 @@ import java.io.File
 object SettingsRepository {
 
     private const val FILE_NAME = "settings.json"
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = true }
     private var file: File? = null
 
     fun init(context: Context) {

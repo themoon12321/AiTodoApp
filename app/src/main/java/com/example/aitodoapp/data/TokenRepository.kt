@@ -22,7 +22,7 @@ data class TokenRecord(
 object TokenRepository {
 
     private const val FILE_NAME = "token.json"
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = true }
     private var file: File? = null
 
     fun init(context: Context) {

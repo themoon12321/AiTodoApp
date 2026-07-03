@@ -11,7 +11,7 @@ import java.time.LocalDate
 object ReportRepository {
 
     private const val FILE_NAME = "reports.json"
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = true }
     private var file: File? = null
 
     fun init(context: Context) {
