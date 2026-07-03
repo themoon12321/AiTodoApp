@@ -39,12 +39,14 @@ object SettingsRepository {
 
     fun save(settings: Settings) {
         val f = file ?: return
+        val tmp = File(f.absolutePath + ".tmp")
         val bak = File(f.absolutePath + ".bak")
         try {
-            if (f.exists()) { if (bak.exists()) bak.delete(); f.renameTo(bak) }
-            f.writeText(json.encodeToString(settings))
-            if (bak.exists()) bak.delete()
-        } catch (e: Exception) { e.printStackTrace() }
+            tmp.writeText(json.encodeToString(settings))
+            if (f.exists()) { bak.delete(); f.renameTo(bak) }
+            tmp.renameTo(f)
+            bak.delete()
+        } catch (e: Exception) { e.printStackTrace(); tmp.delete() }
     }
 
     @Serializable

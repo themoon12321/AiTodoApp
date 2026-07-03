@@ -23,57 +23,58 @@ object TaskRepository {
         val dir = dataDir ?: return emptyList()
         val file = File(dir, filename)
         val bakFile = File(dir, "$filename.bak")
-        if (!file.exists()) {
-            // Primary file missing — try backup
-            if (bakFile.exists()) {
-                return try {
-                    val text = bakFile.readText()
-                    if (text.isBlank()) emptyList()
-                    else json.decodeFromString<List<T>>(text)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    emptyList()
-                }
+
+        // 主文件存在 → 尝试读取
+        if (file.exists()) {
+            try {
+                val text = file.readText()
+                if (text.isNotBlank()) return json.decodeFromString<List<T>>(text)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // 主文件损坏 → 尝试备份
             }
-            return emptyList()
         }
-        return try {
-            val text = file.readText()
-            if (text.isBlank()) emptyList()
-            else json.decodeFromString<List<T>>(text)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // Primary file corrupted — try backup
-            if (bakFile.exists()) {
-                return try {
-                    val text = bakFile.readText()
-                    if (text.isBlank()) emptyList()
-                    else json.decodeFromString<List<T>>(text)
-                } catch (e2: Exception) {
-                    e2.printStackTrace()
-                    emptyList()
+
+        // 主文件缺失或损坏 → 从备份恢复
+        if (bakFile.exists()) {
+            try {
+                val text = bakFile.readText()
+                if (text.isNotBlank()) {
+                    val data = json.decodeFromString<List<T>>(text)
+                    // 从备份成功恢复 → 写回主文件
+                    try { file.writeText(text) } catch (_: Exception) {}
+                    return data
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            emptyList()
         }
+
+        return emptyList()
     }
 
     inline fun <reified T> save(filename: String, data: List<T>) {
         val dir = dataDir ?: return
         val file = File(dir, filename)
         val bakFile = File(dir, "$filename.bak")
+        val tmpFile = File(dir, "$filename.tmp")
+
         try {
-            // Rename existing to backup before overwriting
+            // 先写入临时文件（如果崩溃，原始文件不受影响）
+            tmpFile.writeText(json.encodeToString(data))
+
+            // 原子替换：当前文件 → 备份，临时文件 → 当前文件
             if (file.exists()) {
                 bakFile.delete()
                 file.renameTo(bakFile)
             }
-            file.writeText(json.encodeToString(data))
-            // Write succeeded, remove backup
+            tmpFile.renameTo(file)
+
+            // 写入成功，清理备份
             bakFile.delete()
         } catch (e: Exception) {
             e.printStackTrace()
-            // Write failed — keep backup if it exists
+            tmpFile.delete()  // 清理临时文件
         }
     }
 }
