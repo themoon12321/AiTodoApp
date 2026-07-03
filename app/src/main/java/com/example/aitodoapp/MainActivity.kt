@@ -171,6 +171,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 状态栏深色字体（WindowInsetsControllerCompat 自动处理 API 版本）
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
         TaskRepository.init(applicationContext)
         SettingsRepository.init(applicationContext)
         TokenRepository.init(applicationContext)
