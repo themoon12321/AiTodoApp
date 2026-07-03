@@ -3,6 +3,8 @@ package com.example.aitodoapp
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -171,24 +173,32 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         TaskRepository.init(applicationContext)
         SettingsRepository.init(applicationContext)
         TokenRepository.init(applicationContext)
         ReportRepository.init(applicationContext)
         NotificationHelper.createChannel(applicationContext)
-        if (intent?.getBooleanExtra("open_report", false) == true) openReportTrigger = true
+        if (intent?.getBooleanExtra("open_report", false) == true) {
+            openReportTrigger = true
+            intent.removeExtra("open_report")
+        }
         setContent { AiTodoAppTheme { AppMain(openReportTrigger = openReportTrigger, onClearReportTrigger = { openReportTrigger = false }) } }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra("open_report", false)) openReportTrigger = true
+        if (intent.getBooleanExtra("open_report", false)) {
+            openReportTrigger = true
+            intent.removeExtra("open_report")
+        }
     }
 
     override fun onResume() {
         super.onResume()
         if (intent?.getBooleanExtra("open_report", false) == true) {
             openReportTrigger = true
+            intent?.removeExtra("open_report")
         }
     }
 
