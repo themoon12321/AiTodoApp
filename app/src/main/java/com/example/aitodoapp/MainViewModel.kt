@@ -133,7 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val eid = withContext(Dispatchers.IO) {
                             CalendarSyncHelper.createEvent(context, task.title, syncDate, settings.defaultReminderMinutes,
                                 time = task.deadlineTime?.let { try { LocalTime.parse(it) } catch (_: Exception) { null } },
-                                durationMinutes = task.estimatedMinutes ?: settings.defaultDurationMinutes)
+                                durationMinutes = if (task.deadline != null) 0 else (task.estimatedMinutes ?: settings.defaultDurationMinutes))
                         }
                         if (eid != null) { tasks = tasks.map { if (it.id == task.id) it.copy(calendarEventId = eid) else it }; synced = true }
                     } catch (_: Exception) {}
@@ -170,7 +170,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     val eid = CalendarSyncHelper.createEvent(context, updated.title, sd, settings.defaultReminderMinutes,
                         time = updated.deadlineTime?.let { try { LocalTime.parse(it) } catch (_: Exception) { null } },
-                        durationMinutes = updated.estimatedMinutes ?: settings.defaultDurationMinutes)
+                        durationMinutes = if (updated.deadline != null) 0 else (updated.estimatedMinutes ?: settings.defaultDurationMinutes))
                     if (eid != null) tasks = tasks.map { if (it.id == id) it.copy(calendarEventId = eid) else it }
                 } catch (_: Exception) {}
             }
@@ -228,7 +228,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val eid = CalendarSyncHelper.createEvent(context, title, syncDate, settings.defaultReminderMinutes,
                     time = newTask.deadlineTime?.let { try { LocalTime.parse(it) } catch (_: Exception) { null } },
-                    durationMinutes = newTask.estimatedMinutes ?: settings.defaultDurationMinutes)
+                    durationMinutes = if (dl != null) 0 else (newTask.estimatedMinutes ?: settings.defaultDurationMinutes))
                 if (eid != null) tasks = tasks.map { if (it.id == newTask.id) it.copy(calendarEventId = eid) else it }
             } catch (_: Exception) {}
         }
@@ -244,7 +244,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     val eid = CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes,
                         time = deadlineTime?.let { try { LocalTime.parse(it) } catch (_: Exception) { null } },
-                        durationMinutes = tasks.find { it.id == id }?.estimatedMinutes ?: settings.defaultDurationMinutes)
+                        durationMinutes = 0)
                     tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
                     saveAll(); return
                 } catch (_: Exception) {}
