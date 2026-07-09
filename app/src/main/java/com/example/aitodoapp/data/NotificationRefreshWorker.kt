@@ -25,8 +25,11 @@ class NotificationRefreshWorker(context: Context, params: WorkerParameters) : Co
 
     override suspend fun doWork(): Result {
         return try {
-            // 直接复用 ForegroundService.refresh：它会读当前任务 + 重新构建通知文案
-            // justCompleted=false：这是定时检查，不是用户刚完成，不走鼓励文案
+            // Worker 由系统在后台唤醒，可能是 App 进程被杀后重建，Repository.dataDir 可能为 null，
+            // 必须重新 init，否则 TaskRepository.load 返回空列表 → 通知错误显示"全清空"
+            TaskRepository.init(applicationContext)
+            SettingsRepository.init(applicationContext)
+            NotificationHelper.createChannel(applicationContext)
             ForegroundService.refresh(applicationContext, justCompleted = false)
             Result.success()
         } catch (e: Exception) {

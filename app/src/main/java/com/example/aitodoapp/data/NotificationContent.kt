@@ -1,6 +1,7 @@
 package com.example.aitodoapp.data
 
 import android.content.Context
+import android.util.Log
 import com.example.aitodoapp.Task
 import java.time.LocalDate
 import java.time.LocalTime
@@ -20,9 +21,13 @@ import java.time.temporal.ChronoUnit
  */
 object NotificationContent {
 
-    /** 深夜时段：22:00 ~ 次日 7:00，不显示任务提醒 */
-    private const val QUIET_START = 22
-    private const val QUIET_END = 7
+    /**
+     * 核心睡眠静默时段：不显示任务提醒，避免深夜下拉通知看到任务制造焦虑。
+     * 设为 4:00-6:00（极窄窗口）：多数人这个时段在深度睡眠。
+     * 若需调整，改这两个常量即可。设为相同值（如 QUIET_START=QUIET_END）可彻底禁用静默。
+     */
+    private const val QUIET_START = 4
+    private const val QUIET_END = 6
 
     data class Content(val title: String, val subtext: String)
 
@@ -30,6 +35,7 @@ object NotificationContent {
         val now = LocalTime.now()
         // 1. 深夜静态
         if (isQuietHours(now)) {
+            Log.d("NotificationContent", "quiet hours ($now), static content")
             return Content("AI 代办", "后台运行中")
         }
 
@@ -37,9 +43,11 @@ object NotificationContent {
         val today = LocalDate.now()
         val active = tasks.filter { !it.isArchived && !it.isDeleted }
         val pending = active.filter { !it.isCompleted }
+        Log.d("NotificationContent", "loaded ${tasks.size} tasks, ${pending.size} pending")
 
         // 5. 全清空
         if (pending.isEmpty()) {
+            Log.d("NotificationContent", "no pending → celebrate")
             return Content("今天全搞定啦！🎉", GagPool.pick(GagPool.celebrate))
         }
 

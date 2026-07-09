@@ -261,6 +261,19 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         Spacer(Modifier.height(12.dp))
         Button(onClick = { showCalendarTest = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("测试日历写入") }
         Spacer(Modifier.height(8.dp))
+        // 通知刷新测试：直接触发一次刷新，并用 Toast 显示决策结果，方便不用 adb 排查
+        Button(onClick = {
+            com.example.aitodoapp.ForegroundService.refresh(settingsContext, justCompleted = false)
+            // 读一下当前任务数，Toast 给用户看，确认数据能读到
+            val tasks = com.example.aitodoapp.data.TaskRepository.load<com.example.aitodoapp.Task>("tasks.json")
+            val pending = tasks.count { !it.isArchived && !it.isDeleted && !it.isCompleted }
+            val hour = java.time.LocalTime.now().hour
+            val quiet = hour >= 4 && hour < 6
+            android.widget.Toast.makeText(settingsContext,
+                "已触发刷新 | 总${tasks.size} 待办${pending} | ${if (quiet) "静默时段" else "正常显示"}",
+                android.widget.Toast.LENGTH_LONG).show()
+        }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("🔔 刷新通知（测试）", fontSize = 13.sp) }
+        Spacer(Modifier.height(8.dp))
         if (onTestReport != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { onTestReport(true) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text("🌅 测试早间播报", fontSize = 13.sp) }
