@@ -341,12 +341,18 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             saved = true
         }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("保存") }
         if (showCalendarTest) CalendarTestDialog(onDismiss = { showCalendarTest = false })
-        if (showLogScreen) {
+        if (saved) { Spacer(Modifier.height(8.dp)); Text("✓ 已保存", color = MaterialTheme.colorScheme.primary) }
+    }
+    // 日志页用全屏 Dialog，脱离 SettingsScreen 的可滚动 Column，避免 fillMaxSize 在 verticalScroll 内崩溃
+    if (showLogScreen) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showLogScreen = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
             androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                 com.example.aitodoapp.ui.screens.LogScreen(onDismiss = { showLogScreen = false })
             }
         }
-        if (saved) { Spacer(Modifier.height(8.dp)); Text("✓ 已保存", color = MaterialTheme.colorScheme.primary) }
     }
 }
 
