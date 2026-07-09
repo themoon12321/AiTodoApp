@@ -196,8 +196,13 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             Switch(checked = keepAlive, onCheckedChange = {
                 keepAlive = it
                 // 即时启停：保活状态需要立即生效，不能等"保存"按钮
-                if (it) com.example.aitodoapp.ForegroundService.start(settingsContext)
-                else com.example.aitodoapp.ForegroundService.stop(settingsContext)
+                if (it) {
+                    com.example.aitodoapp.ForegroundService.start(settingsContext)
+                    com.example.aitodoapp.data.NotificationRefreshWorker.start(settingsContext)
+                } else {
+                    com.example.aitodoapp.ForegroundService.stop(settingsContext)
+                    com.example.aitodoapp.data.NotificationRefreshWorker.stop(settingsContext)
+                }
             })
         }
         if (reportEnabled) {

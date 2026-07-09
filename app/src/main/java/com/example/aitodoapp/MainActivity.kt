@@ -180,7 +180,10 @@ class MainActivity : ComponentActivity() {
         NotificationHelper.createChannel(applicationContext)
         // 恢复保活状态：系统重启或 App 被完全杀过后重新打开时，按上次设置决定是否拉起前台服务
         if (SettingsRepository.load().keepAliveEnabled) {
-            try { ForegroundService.start(applicationContext) } catch (_: Exception) {}
+            try {
+                ForegroundService.start(applicationContext)
+                com.example.aitodoapp.data.NotificationRefreshWorker.start(applicationContext)
+            } catch (_: Exception) {}
         }
         if (intent?.getBooleanExtra("open_report", false) == true) {
             openReportTrigger = true

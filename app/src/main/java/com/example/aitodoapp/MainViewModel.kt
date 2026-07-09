@@ -97,6 +97,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         TaskRepository.save("tags.json", allTags)
     }
 
+    /** 任务有变化时刷新前台服务通知（保活开着才有用，没开则静默跳过） */
+    private fun notifyRefresh(justCompleted: Boolean = false) {
+        try { ForegroundService.refresh(context, justCompleted) } catch (_: Exception) {}
+    }
+
     // ===== 初始化（需在 LaunchedEffect 中调用一次） =====
     private var initialized = false
 
@@ -176,6 +181,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         saveAll()
+        notifyRefresh(justCompleted = !wasCompleted)
     }
 
     fun deleteTask(id: String) {
@@ -183,16 +189,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (t?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
         tasks = tasks.map { if (it.id == id) it.copy(isDeleted = true, deletedAt = today) else it }
         saveAll()
+        notifyRefresh()
     }
 
     fun archiveTask(id: String, completedDate: LocalDate? = null) {
         tasks = tasks.map { if (it.id == id) it.copy(isArchived = true, isCompleted = true, completedAt = completedDate ?: today) else it }
         saveAll()
+        notifyRefresh()
     }
 
     fun unarchiveTask(id: String) {
         tasks = tasks.map { if (it.id == id) it.copy(isArchived = false, isCompleted = false) else it }
         saveAll()
+        notifyRefresh()
     }
 
     fun addTag(n: String): String {
@@ -233,6 +242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: Exception) {}
         }
         saveAll()
+        notifyRefresh()
     }
 
     fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList(), estimatedMinutes: Int? = null) {
@@ -246,21 +256,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         time = deadlineTime?.let { try { LocalTime.parse(it) } catch (_: Exception) { null } },
                         durationMinutes = 0)
                     tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
-                    saveAll(); return
+                    saveAll(); notifyRefresh(); return
                 } catch (_: Exception) {}
             }
         }
         tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes) else it }
         saveAll()
+        notifyRefresh()
     }
 
     fun restoreTask(id: String) {
         tasks = tasks.map { if (it.id == id) it.copy(isDeleted = false, deletedAt = null) else it }
         saveAll()
+        notifyRefresh()
     }
 
     fun permanentDelete(id: String) {
         tasks = tasks.filter { it.id != id }
         saveAll()
+        notifyRefresh()
     }
 }
