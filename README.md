@@ -112,7 +112,6 @@ App 正常运行需要以下权限，请按需开启：
 com.example.aitodoapp/
 ├── MainActivity.kt          # 入口 Activity + 数据模型 + 主导航
 ├── MainViewModel.kt         # 业务逻辑（CRUD、排序、自动优先级、日历同步）
-├── ForegroundService.kt     # 前台保活服务
 ├── data/
 │   ├── AiService.kt         # AI API 客户端（Function Calling）
 │   ├── AiTypes.kt           # AI 动作类型（Create / Complete / Delete / Update 等）
@@ -129,9 +128,6 @@ com.example.aitodoapp/
 │   ├── screens/             # 任务 / 归档 / 标签 / 设置 / 播报页面
 │   ├── components/          # 可复用组件（TaskItem, TagChip, AddTaskDialog 等）
 │   └── theme/               # 主题（颜色、字体、日夜间模式）
-└── voice/                   # 预留语音输入功能（开发中）
-    ├── VoiceEntryService.kt
-    └── VoiceDialogActivity.kt
 ```
 
 ## 🚀 构建与安装

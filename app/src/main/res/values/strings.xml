@@ -1,4 +1,3 @@
 <resources>
     <string name="app_name">AiTodoApp</string>
-    <string name="voice_service_desc">长按音量键语音输入代办任务</string>
 </resources>
