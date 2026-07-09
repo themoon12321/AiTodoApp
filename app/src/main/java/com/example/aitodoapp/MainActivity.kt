@@ -177,6 +177,7 @@ class MainActivity : ComponentActivity() {
         SettingsRepository.init(applicationContext)
         TokenRepository.init(applicationContext)
         ReportRepository.init(applicationContext)
+        com.example.aitodoapp.data.ActionLogRepository.init(applicationContext)
         NotificationHelper.createChannel(applicationContext)
         // 恢复保活状态：系统重启或 App 被完全杀过后重新打开时，按上次设置决定是否拉起前台服务
         if (SettingsRepository.load().keepAliveEnabled) {

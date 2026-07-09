@@ -54,6 +54,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
     var model by remember { mutableStateOf(s.value.model) }
     var saved by remember { mutableStateOf(false) }
     var showCalendarTest by remember { mutableStateOf(false) }
+    var showLogScreen by remember { mutableStateOf(false) }
     var autoSync by remember { mutableStateOf(s.value.autoSyncCalendar) }
     var defaultRemind by remember { mutableStateOf(s.value.defaultReminderMinutes) }
     val settingsContext = LocalContext.current
@@ -259,6 +260,8 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
         Spacer(Modifier.height(12.dp))
+        Button(onClick = { showLogScreen = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("📋 查看操作日志", fontSize = 13.sp) }
+        Spacer(Modifier.height(8.dp))
         Button(onClick = { showCalendarTest = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("测试日历写入") }
         Spacer(Modifier.height(8.dp))
         // 通知刷新测试：直接触发一次刷新，并用 Toast 显示决策结果，方便不用 adb 排查
@@ -338,6 +341,11 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             saved = true
         }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("保存") }
         if (showCalendarTest) CalendarTestDialog(onDismiss = { showCalendarTest = false })
+        if (showLogScreen) {
+            androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                com.example.aitodoapp.ui.screens.LogScreen(onDismiss = { showLogScreen = false })
+            }
+        }
         if (saved) { Spacer(Modifier.height(8.dp)); Text("✓ 已保存", color = MaterialTheme.colorScheme.primary) }
     }
 }

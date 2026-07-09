@@ -109,8 +109,21 @@ fun TaskScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     // 共享的 AI 结果处理逻辑（避免两处重复）
-    fun processAiResult(result: com.example.aitodoapp.data.AiResult, aiTaskList: List<Task>) {
+    fun processAiResult(result: com.example.aitodoapp.data.AiResult, aiTaskList: List<Task>, userInput: String = "") {
         aiReply = result.text
+        // 记录 AI 输出日志：返回文本 + 调用了哪些工具 + token 消耗
+        val toolNames = result.actions.joinToString(", ") { it::class.simpleName ?: "?" }
+        val tokenInfo = if (result.promptTokens + result.completionTokens > 0) " | token: ${result.promptTokens}+${result.completionTokens}" else ""
+        val aiDetail = buildString {
+            if (userInput.isNotBlank()) append("输入：$userInput\n")
+            append("回复：${result.text.take(200)}")
+            if (toolNames.isNotBlank()) append("\n工具：$toolNames")
+            append(tokenInfo)
+        }
+        com.example.aitodoapp.data.ActionLogRepository.add(
+            com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_OUTPUT, source = "AI",
+                summary = "AI回复：${result.text.take(30)}${if (result.text.length > 30) "..." else ""}", detail = aiDetail)
+        )
         var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
         for (action in result.actions) {
             when (action) {
@@ -226,7 +239,7 @@ fun TaskScreen(
                                         aiLoading = false; aiStatus = ""; return@withContext
                                     }
                                     aiReply = result.text
-                                    processAiResult(result, aiTaskList)
+                                    processAiResult(result, aiTaskList, input)
                                 }
             }
         }
@@ -365,6 +378,9 @@ fun TaskScreen(
                                         }; prefix + formatTaskForAi(t, today)
                                     }
                                     val tagNames = allTags.map { it.name }
+                                    com.example.aitodoapp.data.ActionLogRepository.add(
+                                        com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_INPUT, source = "AI", summary = "用户输入：$t", detail = t)
+                                    )
                                     val result = AiService.processMessage(t, taskDescriptions, tagNames)
                                     TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                     scope.launch(Dispatchers.Main) {
@@ -380,7 +396,7 @@ fun TaskScreen(
                                             aiLoading = false; aiStatus = ""; return@launch
                                         }
                                         aiReply = result.text
-                                        processAiResult(result, aiTaskList)
+                                        processAiResult(result, aiTaskList, t)
                                     }
                                 } catch (_: kotlinx.coroutines.CancellationException) { aiLoading = false; aiStatus = "" }
                                 catch (e: Exception) { scope.launch(Dispatchers.Main) { aiReply = "出错了：${e.message}"; aiLoading = false; aiStatus = "" } }

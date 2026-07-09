@@ -27,6 +27,7 @@ class ReportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             SettingsRepository.init(applicationContext)
             TokenRepository.init(applicationContext)
             ReportRepository.init(applicationContext)
+            ActionLogRepository.init(applicationContext)
             NotificationHelper.createChannel(applicationContext)
             val today = LocalDate.now()
 
@@ -60,6 +61,8 @@ class ReportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
             val entry = ReportEntry(result.text, isMorning, today.toString())
             ReportRepository.addReport(entry, retentionDays)
+            ActionLogRepository.add(ActionLog(type = LogType.REPORT, source = "SYSTEM",
+                summary = "${if (isMorning) "早间" else "晚间"}播报已生成", detail = result.text.take(200)))
 
             val pi = NotificationHelper.reportPendingIntent(applicationContext)
             NotificationHelper.showWithIntent(applicationContext,
