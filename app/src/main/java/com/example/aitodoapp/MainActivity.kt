@@ -178,6 +178,10 @@ class MainActivity : ComponentActivity() {
         TokenRepository.init(applicationContext)
         ReportRepository.init(applicationContext)
         NotificationHelper.createChannel(applicationContext)
+        // 恢复保活状态：系统重启或 App 被完全杀过后重新打开时，按上次设置决定是否拉起前台服务
+        if (SettingsRepository.load().keepAliveEnabled) {
+            try { ForegroundService.start(applicationContext) } catch (_: Exception) {}
+        }
         if (intent?.getBooleanExtra("open_report", false) == true) {
             openReportTrigger = true
             intent.removeExtra("open_report")
@@ -240,7 +244,7 @@ fun AppMain(viewModel: MainViewModel = viewModel(), openReportTrigger: Boolean =
                             }
                             val tags = viewModel.allTags.map { it.name }
                             val result = AiService.generateDailyReport(descs, tags, isMorning)
-                            if (!result.text.startsWith("网络请求失败") && !result.text.startsWith("请先")) {
+                            if (result.error == null) {
                                 val entry = com.example.aitodoapp.model.ReportEntry(result.text, isMorning, today.toString())
                                 com.example.aitodoapp.data.ReportRepository.addReport(entry)
                                 com.example.aitodoapp.data.NotificationHelper.show(context,

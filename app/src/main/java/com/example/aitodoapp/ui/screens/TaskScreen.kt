@@ -212,14 +212,22 @@ fun TaskScreen(
                 val tagNames = allTags.map { it.name }
                 val result = AiService.processMessage(input, taskDescriptions, tagNames)
                 TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
-                withContext(Dispatchers.Main) {
-                    if (result.text.startsWith("网络请求失败")) {
-                        aiReply = "⚠️ 网络不可用，请稍后手动重试（输入已保留）"
-                        aiLoading = false; aiStatus = ""; return@withContext
-                    }
-                    aiReply = result.text
-                    processAiResult(result, aiTaskList)
-                }
+                                withContext(Dispatchers.Main) {
+                                    if (result.error != null) {
+                                        // 网络类瞬时错误才保留待重试；配置类错误直接提示用户去设置
+                                        val transient = result.error.contains("超时") || result.error.contains("无法连接") ||
+                                            result.error.contains("网络异常") || result.error.contains("服务器内部错误")
+                                        if (transient) {
+                                            pendingRetryInput = input
+                                            aiReply = "⚠️ ${result.error}，回到前台自动重试..."
+                                        } else {
+                                            aiReply = "⚠️ ${result.error}"
+                                        }
+                                        aiLoading = false; aiStatus = ""; return@withContext
+                                    }
+                                    aiReply = result.text
+                                    processAiResult(result, aiTaskList)
+                                }
             }
         }
     }
@@ -360,7 +368,17 @@ fun TaskScreen(
                                     val result = AiService.processMessage(t, taskDescriptions, tagNames)
                                     TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                     scope.launch(Dispatchers.Main) {
-                                        if (result.text.startsWith("网络请求失败")) { pendingRetryInput = t; aiReply = "⚠️ 网络不可用，回到前台自动重试..."; aiLoading = false; aiStatus = ""; return@launch }
+                                        if (result.error != null) {
+                                            val transient = result.error.contains("超时") || result.error.contains("无法连接") ||
+                                                result.error.contains("网络异常") || result.error.contains("服务器内部错误")
+                                            if (transient) {
+                                                pendingRetryInput = t
+                                                aiReply = "⚠️ ${result.error}，回到前台自动重试..."
+                                            } else {
+                                                aiReply = "⚠️ ${result.error}"
+                                            }
+                                            aiLoading = false; aiStatus = ""; return@launch
+                                        }
                                         aiReply = result.text
                                         processAiResult(result, aiTaskList)
                                     }

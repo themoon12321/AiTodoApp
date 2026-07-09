@@ -34,41 +34,70 @@ object AiService {
 
     fun processMessage(userMessage: String, currentTasks: List<String> = emptyList(), currentTags: List<String> = emptyList()): AiResult {
         val settings = SettingsRepository.load()
-        if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key")
+        if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key", error = "no_api_key")
 
         val taskList = currentTasks.joinToString("\n") { "- $it" }.ifEmpty { "（暂无任务）" }
         val tagList = currentTags.joinToString("\n") { "- $it" }.ifEmpty { "（暂无标签）" }
 
         val requestJson = buildRequestJson(userMessage, taskList, tagList, settings.model)
-        val responseBody = httpPost(settings.apiUrl, settings.apiKey, requestJson)
-            ?: return AiResult("网络请求失败，检查网络连接和 API 设置")
+        val http = httpPost(settings.apiUrl, settings.apiKey, requestJson)
+        http.error?.let { return AiResult(it, error = it) }
+        val responseBody = http.body ?: return AiResult("网络请求失败：响应为空", error = "empty_response")
 
         return parseResponse(responseBody)
     }
 
     fun generateDailyReport(currentTasks: List<String>, currentTags: List<String>, isMorning: Boolean): AiResult {
         val settings = SettingsRepository.load()
-        if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key")
+        if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key", error = "no_api_key")
 
         val taskList = currentTasks.joinToString("\n") { "- $it" }.ifEmpty { "（暂无任务）" }
         val tagList = currentTags.joinToString("\n") { "- $it" }.ifEmpty { "（暂无标签）" }
 
         val requestJson = buildReportRequestJson(isMorning, taskList, tagList, settings.model)
-        val responseBody = httpPost(settings.apiUrl, settings.apiKey, requestJson)
-            ?: return AiResult("网络请求失败，检查网络连接和 API 设置")
+        val http = httpPost(settings.apiUrl, settings.apiKey, requestJson)
+        http.error?.let { return AiResult(it, error = it) }
+        val responseBody = http.body ?: return AiResult("网络请求失败：响应为空", error = "empty_response")
 
         val result = parseResponse(responseBody)
         return result.copy(text = result.text.ifEmpty { "生成失败，请重试" })
     }
 
-    private fun httpPost(url: String, apiKey: String, jsonBody: String): String? {
+    /** HTTP 调用结果：成功时 body 有值，失败时 error 给出可读原因 */
+    private data class HttpResult(val body: String?, val error: String?)
+
+    private fun httpPost(url: String, apiKey: String, jsonBody: String): HttpResult {
         return try {
             val response = client.newCall(Request.Builder().url(url)
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .post(jsonBody.toRequestBody(mediaType)).build()).execute()
-            if (!response.isSuccessful) null else response.body?.string()
-        } catch (_: Exception) { null }
+            if (response.isSuccessful) {
+                HttpResult(response.body?.string(), null)
+            } else {
+                HttpResult(null, httpErrorDescription(response.code))
+            }
+        } catch (e: java.net.SocketTimeoutException) {
+            HttpResult(null, "请求超时：网络太慢或服务器无响应")
+        } catch (e: java.net.UnknownHostException) {
+            HttpResult(null, "无法连接服务器：检查 API 地址或网络")
+        } catch (e: javax.net.ssl.SSLException) {
+            HttpResult(null, "SSL/HTTPS 错误：${e.message ?: ""}")
+        } catch (e: Exception) {
+            HttpResult(null, "网络异常：${e.javaClass.simpleName}")
+        }
+    }
+
+    /** 把 HTTP 状态码翻译成可读的失败原因，方便用户排查 */
+    private fun httpErrorDescription(code: Int): String = when (code) {
+        401 -> "API Key 无效或已过期（401）"
+        402 -> "账户欠费，请充值（402）"
+        403 -> "请求被拒绝（403）：可能无权限或 IP 被封"
+        404 -> "API 地址错误（404）：找不到该接口"
+        422 -> "请求格式错误（422）：模型名或参数有问题"
+        429 -> "请求过于频繁或额度用尽（429）"
+        in 500..599 -> "服务器内部错误（$code），稍后重试"
+        else -> "请求失败（HTTP $code）"
     }
 
     // ======== JSON 构建 ========
@@ -495,7 +524,10 @@ $tagList
             val promptTokens = usage?.get("prompt_tokens")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             val completionTokens = usage?.get("completion_tokens")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             AiResult(text = content ?: "已完成", actions = actions, promptTokens = promptTokens, completionTokens = completionTokens)
-        } catch (_: Exception) { AiResult("处理 AI 响应时出错") }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            AiResult("解析 AI 响应出错：${e.message ?: e.javaClass.simpleName}", error = "parse_error")
+        }
     }
 }
 

@@ -186,6 +186,20 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
             }
             Switch(checked = reportEnabled, onCheckedChange = { reportEnabled = it })
         }
+        Spacer(Modifier.height(8.dp))
+        var keepAlive by remember { mutableStateOf(s.value.keepAliveEnabled) }
+        Row(Modifier.fillMaxWidth().clickable { keepAlive = !keepAlive }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("后台保活", style = MaterialTheme.typography.bodyMedium)
+                Text("开启前台服务常驻通知栏，防止 App 被杀导致播报不响（国产 ROM 仍需在系统设置里允许后台运行）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = keepAlive, onCheckedChange = {
+                keepAlive = it
+                // 即时启停：保活状态需要立即生效，不能等"保存"按钮
+                if (it) com.example.aitodoapp.ForegroundService.start(settingsContext)
+                else com.example.aitodoapp.ForegroundService.stop(settingsContext)
+            })
+        }
         if (reportEnabled) {
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -293,7 +307,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onTestReport: ((Boolean) -> Un
         Spacer(Modifier.height(24.dp))
         Spacer(Modifier.height(24.dp))
         Button(onClick = {
-            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, s.value.defaultDurationMinutes, sortOrder, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime)
+            val newSettings = SettingsRepository.Settings(apiUrl.trim(), apiKey.trim(), model.trim(), mergeOverdue, longChat, showToken, autoSync, defaultRemind, s.value.defaultDurationMinutes, sortOrder, reportEnabled, s.value.morningReportTime, s.value.eveningReportTime, keepAlive)
             SettingsRepository.save(newSettings)
             if (reportEnabled && onScheduleDaily != null) {
                 val mh = s.value.morningReportTime.substringBefore(":").toIntOrNull() ?: 7

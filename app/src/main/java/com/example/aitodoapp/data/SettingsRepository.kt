@@ -63,6 +63,7 @@ object SettingsRepository {
         val taskSortOrder: String = "manual",
         val reportEnabled: Boolean = false,
         val morningReportTime: String = "07:00",
-        val eveningReportTime: String = "21:00"
+        val eveningReportTime: String = "21:00",
+        val keepAliveEnabled: Boolean = false
     )
 }

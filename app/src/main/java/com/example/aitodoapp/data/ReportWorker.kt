@@ -2,8 +2,9 @@ package com.example.aitodoapp.data
 
 import android.content.Context
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingWorkPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -32,20 +33,29 @@ class ReportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             val tasks = TaskRepository.load<Task>("tasks.json")
             val allTags = TaskRepository.load<com.example.aitodoapp.Tag>("tags.json")
             val descs = tasks.map { t ->
+                val parts = mutableListOf<String>()
                 val p = when {
-                    t.isCompleted -> "[已完成] "
-                    t.deadline != null && t.deadline < today && !t.isCompleted -> "[过期] "
-                    else -> ""
+                    t.isCompleted -> "[已完成]"
+                    t.deadline != null && t.deadline < today && !t.isCompleted -> "[过期]"
+                    else -> null
                 }
-                p + "${t.title} | ${t.priority.emoji}${t.priority.label}" +
-                    if (t.deadline != null) " | 截止:${t.deadline}" else "" +
-                    if (t.tags.isNotEmpty()) " | 🏷${t.tags.joinToString(",")}" else ""
+                if (p != null) parts.add(p)
+                parts.add(t.title)
+                parts.add("${t.priority.emoji}${t.priority.label}")
+                if (t.deadline != null) parts.add("截止:${t.deadline}")
+                if (t.tags.isNotEmpty()) parts.add("🏷${t.tags.joinToString(",")}")
+                parts.joinToString(" | ")
             }
             val tagNames = allTags.map { it.name }
 
             val result = AiService.generateDailyReport(descs, tagNames, isMorning)
-            if (result.text.startsWith("网络请求失败") || result.text.startsWith("请先")) {
-                return Result.retry()
+            if (result.error != null) {
+                // 配置类错误（Key错/欠费/地址错）重试也没用，直接成功结束周期；
+                // 瞬时错误（网络/超时/限流/5xx）交给 WorkManager 重试。
+                val noRetry = result.error.startsWith("API Key") || result.error.contains("401") ||
+                    result.error.contains("402") || result.error.contains("404") ||
+                    result.error.contains("422")
+                return if (noRetry) Result.success() else Result.retry()
             }
 
             val entry = ReportEntry(result.text, isMorning, today.toString())
@@ -56,13 +66,6 @@ class ReportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 if (isMorning) "🌅 早间播报已送达" else "🌙 晚间播报已送达",
                 "点击查看今日播报详情", pi)
 
-            // 执行成功后，调度明天的同一时间
-            val settings = SettingsRepository.load()
-            val timeStr = if (isMorning) settings.morningReportTime else settings.eveningReportTime
-            val hour = timeStr.substringBefore(":").toIntOrNull() ?: if (isMorning) 7 else 21
-            val minute = timeStr.substringAfter(":").toIntOrNull() ?: 0
-            scheduleNext(applicationContext, isMorning, hour, minute)
-
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -71,7 +74,9 @@ class ReportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 
     companion object {
-        /** 一次性延迟测试 */
+        private const val PERIODIC_INTERVAL_MIN = 24 * 60L  // 24 小时周期
+
+        /** 一次性延迟测试（保留原有行为） */
         fun schedule(context: Context, isMorning: Boolean, delayMinutes: Long = 1) {
             val request = OneTimeWorkRequestBuilder<ReportWorker>()
                 .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
@@ -81,43 +86,46 @@ class ReportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             WorkManager.getInstance(context).enqueue(request)
         }
 
-        /** 调度每日定时播报（计算到下次时间的毫秒数） */
+        /**
+         * 调度每日定时播报。改用 PeriodicWorkRequest：
+         * 系统自动维护周期调度，不再依赖"执行成功后才排下一次"的链式续约，
+         * 即使某次因进程被杀/网络失败没执行，下次周期仍会由系统重新拉起，杜绝永久断链。
+         *
+         * 取舍：PeriodicWork 最小周期 15 分钟，执行时刻会因 Doze/省电策略漂移几分钟到几十分钟，
+         * 对"每日早晚一次"的场景可接受。初始延迟算到最近一个目标时刻。
+         */
         fun scheduleDaily(context: Context, isMorning: Boolean, hour: Int, minute: Int) {
-            val now = LocalDateTime.now()
-            val targetToday = now.with(LocalTime.of(hour, minute))
-            val target = if (targetToday.isAfter(now)) targetToday else targetToday.plusDays(1)
-            val delayMs = Duration.between(now, target).toMillis()
-
+            val delayMs = msUntilNext(hour, minute)
             val tag = if (isMorning) "daily_morning" else "daily_evening"
-            // 取消旧任务，用新任务替换
-            WorkManager.getInstance(context).cancelUniqueWork(tag)
 
-            val request = OneTimeWorkRequestBuilder<ReportWorker>()
+            val request = PeriodicWorkRequestBuilder<ReportWorker>(PERIODIC_INTERVAL_MIN, TimeUnit.MINUTES)
                 .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
                 .setInputData(workDataOf("is_morning" to isMorning))
                 .addTag(tag)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(tag, ExistingWorkPolicy.REPLACE, request)
+            // KEEP：若已存在同 tag 的周期任务，保留原调度，避免每次保存设置都重置周期时钟。
+            // 改用 REPLACE 仅在用户明确改时间时才需要，由调用方通过 updateSchedule 触发。
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(tag, ExistingPeriodicWorkPolicy.UPDATE, request)
         }
 
-        /** 执行完成后调度明天同一时间 */
-        private fun scheduleNext(context: Context, isMorning: Boolean, hour: Int, minute: Int) {
-            val tomorrow = LocalDateTime.now().plusDays(1).with(LocalTime.of(hour, minute))
-            val delayMs = Duration.between(LocalDateTime.now(), tomorrow).toMillis()
-
+        /** 取消指定时段的定时播报 */
+        fun cancel(context: Context, isMorning: Boolean) {
             val tag = if (isMorning) "daily_morning" else "daily_evening"
-            val request = OneTimeWorkRequestBuilder<ReportWorker>()
-                .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
-                .setInputData(workDataOf("is_morning" to isMorning))
-                .addTag(tag)
-                .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(tag, ExistingWorkPolicy.REPLACE, request)
+            WorkManager.getInstance(context).cancelUniqueWork(tag)
         }
 
         /** 取消所有定时播报 */
         fun cancelAll(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork("daily_morning")
             WorkManager.getInstance(context).cancelUniqueWork("daily_evening")
+        }
+
+        /** 计算从现在到下一个目标时刻（hh:mm）的毫秒数。若今天已过该时刻，则算到明天。 */
+        private fun msUntilNext(hour: Int, minute: Int): Long {
+            val now = LocalDateTime.now()
+            val targetToday = now.with(LocalTime.of(hour, minute))
+            val target = if (targetToday.isAfter(now)) targetToday else targetToday.plusDays(1)
+            return Duration.between(now, target).toMillis()
         }
     }
 }
