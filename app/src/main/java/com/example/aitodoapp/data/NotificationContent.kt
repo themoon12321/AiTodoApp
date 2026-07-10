@@ -85,7 +85,7 @@ object NotificationContent {
 
     /** 是否处于深夜静默时段 */
     private fun isQuietHours(now: LocalTime): Boolean {
-        return now.hour >= QUIET_START || now.hour < QUIET_END
+        return now.hour >= QUIET_START && now.hour < QUIET_END
     }
 
     /**
