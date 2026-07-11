@@ -20,6 +20,11 @@ object TaskRepository {
         dataDir = context.filesDir
     }
 
+    fun fileExists(filename: String): Boolean {
+        val dir = dataDir ?: return false
+        return File(dir, filename).exists()
+    }
+
     inline fun <reified T> load(filename: String): List<T> {
         val dir = dataDir ?: return emptyList()
         val file = File(dir, filename)

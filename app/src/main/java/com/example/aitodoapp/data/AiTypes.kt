@@ -2,7 +2,15 @@ package com.example.aitodoapp.data
 
 import com.example.aitodoapp.Priority
 
-data class AiResult(val text: String, val actions: List<AiAction> = emptyList(), val promptTokens: Int = 0, val completionTokens: Int = 0, val error: String? = null)
+data class AiResult(
+    val text: String,
+    val actions: List<AiAction> = emptyList(),
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+    val error: String? = null,
+    val rawRequest: String = "",    // 发给 AI 的完整请求 JSON
+    val rawResponse: String = ""    // AI 返回的完整响应 JSON
+)
 
 sealed class AiAction {
     data class CreateTask(val title: String, val content: String = "", val priority: Priority, val deadline: java.time.LocalDate?, val tags: List<String>, val plannedDates: List<java.time.LocalDate> = emptyList(), val deadlineTime: String? = null, val estimatedMinutes: Int? = null) : AiAction()

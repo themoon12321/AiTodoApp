@@ -5,7 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
-import com.example.aitodoapp.data.ActionLog
+import com.example.aitodoapp.data.AppLogger
 import com.example.aitodoapp.data.ActionLogRepository
 import com.example.aitodoapp.data.CalendarSyncHelper
 import com.example.aitodoapp.data.LogType
@@ -21,7 +21,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
 
     // ===== 状态 =====
-    var tasks by mutableStateOf(TaskRepository.load<Task>("tasks.json"))
+    var tasks by mutableStateOf(emptyList<Task>())
+        private set
+    var archivedTasks by mutableStateOf(emptyList<Task>())
+        private set
+    var deletedTasks by mutableStateOf(emptyList<Task>())
         private set
     var allTags by mutableStateOf(TaskRepository.load<Tag>("tags.json"))
         private set
@@ -33,9 +37,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val today: LocalDate get() = LocalDate.now()
 
     // ===== 派生属性 =====
-    val allActive get() = tasks.filter { !it.isArchived && !it.isDeleted }
+    val allActive get() = tasks
 
-    val overdueTasks get() = allActive.filter {
+    val overdueTasks get() = tasks.filter {
         !it.isCompleted && (
             (it.deadline != null && it.deadline < today) ||
             (it.plannedDates.isNotEmpty() && it.plannedDates.all { d -> d < today })
@@ -43,24 +47,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val activeTasks get() = sortTasks(when (selectedDay) {
-        DayFilter.OVERDUE -> allActive.filter { it.deadline != null && it.deadline < today && !it.isCompleted }
-        DayFilter.ALL -> allActive
-        DayFilter.TODAY -> allActive.filter {
+        DayFilter.OVERDUE -> tasks.filter { it.deadline != null && it.deadline < today && !it.isCompleted }
+        DayFilter.ALL -> tasks
+        DayFilter.TODAY -> tasks.filter {
             val todayRelevant = it.plannedDates.any { d -> d == today } || it.deadline == today ||
                 (it.plannedDates.isEmpty() && it.createdAt <= today && (it.deadline == null || it.deadline >= today))
             todayRelevant || (it.isCompleted && it.completedAt == today)
         }
         else -> {
             val d = selectedDay.date(today) ?: today
-            allActive.filter {
+            tasks.filter {
                 it.plannedDates.any { p -> p == d } ||
                 (it.plannedDates.isEmpty() && it.createdAt <= d && (it.deadline == null || it.deadline >= d))
             }
         }
     })
-
-    val archivedTasks get() = tasks.filter { it.isArchived && !it.isDeleted }
-    val deletedTasks get() = tasks.filter { it.isDeleted }.sortedByDescending { it.deletedAt ?: it.createdAt }
 
     // ===== 排序方法 =====
 
@@ -75,6 +76,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 list.filter { it.isCompleted }.sortedBy { ids[it.id] ?: 0 }
             }
             else -> list
+        }
+    }
+
+    // ===== 批处理（批量操作时合并多次 saveAll 为一次） =====
+
+    private var batchDepth = 0
+    private var batchDirty = false
+
+    /** 进入批处理模式：后续 saveAll() 调用被合并，直到 endBatch() 才真正写入 */
+    fun beginBatch() {
+        batchDepth++
+    }
+
+    /** 退出批处理模式：真正写入一次文件（如有改动） */
+    fun endBatch() {
+        batchDepth--
+        if (batchDepth < 0) batchDepth = 0     // 防重复调用导致负值
+        if (batchDepth == 0 && batchDirty) {
+            saveAll()
+            batchDirty = false
         }
     }
 
@@ -96,8 +117,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun saveAll() {
+        if (batchDepth > 0) { batchDirty = true; return }   // 批次中 → 延迟写入
         TaskRepository.save("tasks.json", tasks)
         TaskRepository.save("tags.json", allTags)
+        TaskRepository.save("archived_tasks.json", archivedTasks)
+        TaskRepository.save("deleted_tasks.json", deletedTasks)
     }
 
     /** 任务有变化时刷新前台服务通知（保活开着才有用，没开则静默跳过） */
@@ -105,39 +129,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try { ForegroundService.refresh(context, justCompleted) } catch (_: Exception) {}
     }
 
-    /** 记录操作日志。source: AI/MANUAL/SYSTEM */
-    private fun log(type: String, source: String, summary: String, detail: String = "") {
-        try { ActionLogRepository.add(ActionLog(type = type, source = source, summary = summary, detail = detail)) } catch (_: Exception) {}
+    /** 记录操作日志。source: AI/MANUAL/SYSTEM，traceId 用于关联同一次 AI 对话的完整链路 */
+    private fun log(type: String, source: String, summary: String, detail: String = "", traceId: String = "") {
+        AppLogger.add(type, source, summary, detail, traceId)
     }
 
     // ===== 初始化（需在 LaunchedEffect 中调用一次） =====
     private var initialized = false
 
+    /** 迁移旧版单文件数据到新版三文件结构 */
+    private fun migrateIfNeeded(): Boolean {
+        if (TaskRepository.fileExists("archived_tasks.json")) return false
+        val oldAll = TaskRepository.load<Task>("tasks.json")
+        if (oldAll.isEmpty()) {
+            // 空数据→直接写个空 archived+deleted 文件，标记迁移完成
+            TaskRepository.save("archived_tasks.json", emptyList<Task>())
+            TaskRepository.save("deleted_tasks.json", emptyList<Task>())
+            tasks = emptyList()
+            archivedTasks = emptyList()
+            deletedTasks = emptyList()
+            return true
+        }
+        tasks = oldAll.filter { !it.isArchived && !it.isDeleted }
+        archivedTasks = oldAll.filter { it.isArchived && !it.isDeleted }
+        deletedTasks = oldAll.filter { it.isDeleted }
+        saveAll()
+        return true
+    }
+
     suspend fun initialize() {
         if (initialized) return
         initialized = true
         var changed = false
-        if (tasks.isEmpty()) {
-            // 首次启动无默认任务
+        val migrated = migrateIfNeeded()
+        if (!migrated) {
+            // 已迁移过 → 正常从各自文件加载
+            tasks = TaskRepository.load<Task>("tasks.json")
+            archivedTasks = TaskRepository.load<Task>("archived_tasks.json")
+            deletedTasks = TaskRepository.load<Task>("deleted_tasks.json")
+        } else if (tasks.isEmpty() && archivedTasks.isEmpty() && deletedTasks.isEmpty()) {
+            // 空迁移完成（无数据）
         } else {
-            tasks = tasks.map { t ->
-                var nt = t
-                if (t.completedAt != null && t.completedAt < today && !t.isArchived) {
-                    changed = true; nt = nt.copy(isArchived = true)
-                }
-                val ap = autoPriority(nt)
-                if (ap != nt.priority && !nt.isArchived && !nt.isCompleted) {
-                    changed = true; nt = nt.copy(priority = ap)
-                }
-                nt
-            }
+            changed = true
         }
-        if (allTags.isEmpty()) {
-            // 首次启动无默认标签
-        }
+
+        if (checkAutoArchive()) changed = true
+
         if (changed) saveAll()
+
+        // 日历同步
         if (settings.autoSyncCalendar) {
-            val toSync = tasks.filter { !it.isCompleted && !it.isArchived && it.calendarEventId == null && (it.deadline != null || it.plannedDates.isNotEmpty()) }
+            val toSync = tasks.filter { !it.isCompleted && it.calendarEventId == null && (it.deadline != null || it.plannedDates.isNotEmpty()) }
             if (toSync.isNotEmpty()) {
                 var synced = false
                 for (task in toSync) {
@@ -154,20 +196,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (synced) saveAll()
             }
         }
+
         // 清理超过30天的已删除任务
         val cutoff = today.minusDays(30)
-        val hasOldDeleted = tasks.any { it.isDeleted && it.deletedAt != null && it.deletedAt!! < cutoff }
+        val hasOldDeleted = deletedTasks.any { it.deletedAt != null && it.deletedAt!! < cutoff }
         if (hasOldDeleted) {
-            tasks = tasks.filter { !(it.isDeleted && it.deletedAt != null && it.deletedAt!! < cutoff) }
+            deletedTasks = deletedTasks.filter { !(it.deletedAt != null && it.deletedAt!! < cutoff) }
             saveAll()
         }
+
         // 记录启动初始化日志
         val initDetail = buildString {
-            append("任务${tasks.size}个，活跃${allActive.size}个，标签${allTags.size}个")
-            if (changed) append("；已自动归档/调整优先级")
+            append("任务${tasks.size}个，归档${archivedTasks.size}个，标签${allTags.size}个")
+            if (migrated) append("；已迁移到新文件结构")
             if (hasOldDeleted) append("；已清理过期回收站")
         }
         log(LogType.SYSTEM, "SYSTEM", "App启动初始化", initDetail)
+    }
+
+    /** 检查自动归档 + 自动调整优先级。返回 true 表示有数据变更。可供定时器调用 */
+    fun checkAutoArchive(): Boolean {
+        var changed = false
+        // 自动归档：昨天及之前完成的任务 → 移入 archivedTasks
+        val toArchive = tasks.filter { it.completedAt != null && it.completedAt < today }
+        if (toArchive.isNotEmpty()) {
+            tasks = tasks.filter { it.id !in toArchive.map { it.id } }
+            archivedTasks = toArchive.map { it.copy(isArchived = true) } + archivedTasks
+            changed = true
+        }
+        // 自动调整未归档任务的优先级
+        tasks = tasks.map { t ->
+            if (t.isCompleted) t
+            else {
+                val ap = autoPriority(t)
+                if (ap != t.priority && !t.priorityLocked) { changed = true; t.copy(priority = ap) }
+                else t
+            }
+        }
+        if (changed) saveAll()
+        return changed
     }
 
     // ===== 操作 =====
@@ -176,11 +243,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         settings = SettingsRepository.load()
     }
 
-    fun completeTask(id: String) {
+    fun completeTask(id: String, traceId: String = "") {
         val t = tasks.find { it.id == id }
         val wasCompleted = t?.isCompleted == true
         if (t != null && !t.isCompleted && t.calendarEventId != null) {
-            CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
+            CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!, t.title)
         }
         tasks = tasks.map { if (it.id == id) { if (it.isCompleted) it.copy(isCompleted = false, completedAt = null, calendarEventId = null) else it.copy(isCompleted = true, completedAt = today) } else it }
         if (wasCompleted && settings.autoSyncCalendar) {
@@ -197,33 +264,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         saveAll()
         notifyRefresh(justCompleted = !wasCompleted)
-        log(if (!wasCompleted) LogType.COMPLETE else LogType.UPDATE, "MANUAL",
-            if (!wasCompleted) "完成任务：${t?.title ?: id}" else "取消完成：${t?.title ?: id}")
+        val src = if (traceId.isNotBlank()) "AI" else "MANUAL"
+        log(if (!wasCompleted) LogType.COMPLETE else LogType.UPDATE, src,
+            if (!wasCompleted) "完成任务：${t?.title ?: id}" else "取消完成：${t?.title ?: id}", traceId = traceId)
     }
 
-    fun deleteTask(id: String) {
-        val t = tasks.find { it.id == id }
-        if (t?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!)
-        tasks = tasks.map { if (it.id == id) it.copy(isDeleted = true, deletedAt = today) else it }
+    fun deleteTask(id: String, traceId: String = "") {
+        val t = tasks.find { it.id == id } ?: archivedTasks.find { it.id == id } ?: return
+        if (t.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, t.calendarEventId!!, t.title)
+        val deleted = t.copy(isDeleted = true, deletedAt = today)
+        tasks = tasks.filter { it.id != id }
+        archivedTasks = archivedTasks.filter { it.id != id }
+        deletedTasks = listOf(deleted) + deletedTasks
         saveAll()
         notifyRefresh()
-        log(LogType.DELETE, "MANUAL", "删除任务：${t?.title ?: id}")
+        log(LogType.DELETE, if (traceId.isNotBlank()) "AI" else "MANUAL", "删除任务：${t.title}", traceId = traceId)
     }
 
-    fun archiveTask(id: String, completedDate: LocalDate? = null) {
-        val t = tasks.find { it.id == id }
-        tasks = tasks.map { if (it.id == id) it.copy(isArchived = true, isCompleted = true, completedAt = completedDate ?: today) else it }
+    fun archiveTask(id: String, completedDate: LocalDate? = null, traceId: String = "") {
+        val t = tasks.find { it.id == id } ?: return
+        val archived = t.copy(isArchived = true, isCompleted = true, completedAt = completedDate ?: today)
+        tasks = tasks.filter { it.id != id }
+        archivedTasks = listOf(archived) + archivedTasks
         saveAll()
         notifyRefresh()
-        log(LogType.ARCHIVE, "MANUAL", "归档任务：${t?.title ?: id}")
+        log(LogType.ARCHIVE, if (traceId.isNotBlank()) "AI" else "MANUAL", "归档任务：${t.title}", traceId = traceId)
     }
 
-    fun unarchiveTask(id: String) {
-        val t = tasks.find { it.id == id }
-        tasks = tasks.map { if (it.id == id) it.copy(isArchived = false, isCompleted = false) else it }
+    fun unarchiveTask(id: String, traceId: String = "") {
+        val t = archivedTasks.find { it.id == id } ?: return
+        val restored = t.copy(isArchived = false, isCompleted = false)
+        archivedTasks = archivedTasks.filter { it.id != id }
+        tasks = listOf(restored) + tasks
         saveAll()
         notifyRefresh()
-        log(LogType.UNARCHIVE, "MANUAL", "取消归档：${t?.title ?: id}")
+        log(LogType.UNARCHIVE, if (traceId.isNotBlank()) "AI" else "MANUAL", "取消归档：${t.title}", traceId = traceId)
     }
 
     fun addTag(n: String): String {
@@ -234,25 +309,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return t
     }
 
-    fun createTag(n: String) {
+    fun createTag(n: String, traceId: String = "") {
         val t = n.trim()
-        if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll(); log(LogType.TAG, "MANUAL", "创建标签：$t") }
+        if (t.isNotBlank() && allTags.none { it.name == t }) { allTags = allTags + Tag(t, false); saveAll(); log(LogType.TAG, if (traceId.isNotBlank()) "AI" else "MANUAL", "创建标签：$t", traceId = traceId) }
     }
 
-    fun promoteTag(n: String) {
+    fun promoteTag(n: String, traceId: String = "") {
         allTags = allTags.map { if (it.name == n) it.copy(isTemporary = false) else it }
         saveAll()
-        log(LogType.TAG, "MANUAL", "标签转正：$n")
+        log(LogType.TAG, if (traceId.isNotBlank()) "AI" else "MANUAL", "标签转正：$n", traceId = traceId)
     }
 
-    fun deleteTag(n: String) {
+    fun deleteTag(n: String, traceId: String = "") {
         allTags = allTags.filter { it.name != n }
         tasks = tasks.map { it.copy(tags = it.tags.filter { t -> t != n }) }
         saveAll()
-        log(LogType.TAG, "MANUAL", "删除标签：$n")
+        log(LogType.TAG, if (traceId.isNotBlank()) "AI" else "MANUAL", "删除标签：$n", traceId = traceId)
     }
 
-    fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList(), deadlineTime: String? = null, estimatedMinutes: Int? = null) {
+    fun addTask(title: String, pri: Priority, dl: LocalDate?, tags: List<String>, content: String = "", planned: List<LocalDate> = emptyList(), deadlineTime: String? = null, estimatedMinutes: Int? = null, traceId: String = "") {
         tags.forEach { addTag(it) }
         val newTask = Task(title = title, content = content, priority = pri, tags = tags, deadline = dl, plannedDates = planned, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes)
         tasks = listOf(newTask) + tasks
@@ -269,43 +344,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         notifyRefresh()
         val dlInfo = if (dl != null) " 截止${dl}" + (deadlineTime?.let { " $it" } ?: "") else ""
         val plInfo = if (planned.isNotEmpty()) " 计划${planned.size}天" else ""
-        log(LogType.CREATE, "MANUAL", "创建任务：$title | ${pri.emoji}${pri.label}$dlInfo$plInfo")
+        val src = if (traceId.isNotBlank()) "AI" else "MANUAL"
+        log(LogType.CREATE, src, "创建任务：$title | ${pri.emoji}${pri.label}$dlInfo$plInfo", traceId = traceId)
     }
 
-    fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList(), estimatedMinutes: Int? = null) {
+    fun updateTask(id: String, title: String, content: String, pri: Priority, dl: LocalDate?, tags: List<String>, planned: List<LocalDate> = emptyList(), lockPriority: Boolean = false, deadlineTime: String? = null, plannedTimes: List<String> = emptyList(), estimatedMinutes: Int? = null, traceId: String = "") {
         tags.forEach { addTag(it) }
         val old = tasks.find { it.id == id }
         if (old?.deadline != dl || old?.deadlineTime != deadlineTime) {
-            if (old?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, old.calendarEventId!!)
+            if (old?.calendarEventId != null) CalendarSyncHelper.deleteEvent(context, old.calendarEventId!!, old.title)
             if (settings.autoSyncCalendar && dl != null) {
                 try {
                     val eid = CalendarSyncHelper.createEvent(context, title, dl, settings.defaultReminderMinutes,
                         time = deadlineTime?.let { try { LocalTime.parse(it) } catch (_: Exception) { null } },
                         durationMinutes = 0)
                     tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes, calendarEventId = eid) else it }
-                    saveAll(); notifyRefresh(); log(LogType.UPDATE, "MANUAL", "修改任务：$title"); return
+                    saveAll(); notifyRefresh(); log(LogType.UPDATE, if (traceId.isNotBlank()) "AI" else "MANUAL", "修改任务：$title", traceId = traceId); return
                 } catch (_: Exception) {}
             }
         }
         tasks = tasks.map { if (it.id == id) it.copy(title = title, content = content, priority = pri, priorityLocked = lockPriority || it.priorityLocked, tags = tags, deadline = dl, deadlineTime = deadlineTime, estimatedMinutes = estimatedMinutes, plannedDates = planned, plannedTimes = plannedTimes) else it }
         saveAll()
         notifyRefresh()
-        log(LogType.UPDATE, "MANUAL", "修改任务：$title")
+        log(LogType.UPDATE, if (traceId.isNotBlank()) "AI" else "MANUAL", "修改任务：$title", traceId = traceId)
     }
 
-    fun restoreTask(id: String) {
-        val t = tasks.find { it.id == id }
-        tasks = tasks.map { if (it.id == id) it.copy(isDeleted = false, deletedAt = null) else it }
+    fun restoreTask(id: String, traceId: String = "") {
+        val t = deletedTasks.find { it.id == id } ?: return
+        val restored = t.copy(isDeleted = false, deletedAt = null)
+        deletedTasks = deletedTasks.filter { it.id != id }
+        tasks = listOf(restored) + tasks
         saveAll()
         notifyRefresh()
-        log(LogType.RESTORE, "MANUAL", "恢复任务：${t?.title ?: id}")
+        log(LogType.RESTORE, if (traceId.isNotBlank()) "AI" else "MANUAL", "恢复任务：${t.title}", traceId = traceId)
     }
 
-    fun permanentDelete(id: String) {
-        val t = tasks.find { it.id == id }
-        tasks = tasks.filter { it.id != id }
+    fun permanentDelete(id: String, traceId: String = "", title: String = "") {
+        val t = deletedTasks.find { it.id == id }
+        deletedTasks = deletedTasks.filter { it.id != id }
         saveAll()
         notifyRefresh()
-        log(LogType.DELETE, "MANUAL", "永久删除：${t?.title ?: id}")
+        val logTitle = title.ifBlank { t?.title ?: id }
+        log(LogType.DELETE, if (traceId.isNotBlank()) "AI" else "MANUAL", "永久删除：$logTitle", traceId = traceId)
     }
 }

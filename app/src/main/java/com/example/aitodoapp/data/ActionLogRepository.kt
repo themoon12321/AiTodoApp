@@ -14,8 +14,10 @@ import java.time.format.DateTimeFormatter
  *
  * @param type 操作类型（见 [LogType]），决定显示的图标和分类
  * @param source 触发来源：AI（AI对话驱动）/ MANUAL（手动点击）/ SYSTEM（后台自动）
+ * @param traceId 追踪链 ID，关联同一次 AI 对话的全部日志（输入→输出→工具调用→执行结果）
  * @param summary 一行摘要，时间轴上直接显示
  * @param detail 可选详情（如 AI 原始输入、工具调用列表、token 消耗），点开详情看
+ * @param changes 变化记录（旧值→新值），如修改任务时记录改了哪些字段
  */
 @Serializable
 data class ActionLog(
@@ -24,13 +26,23 @@ data class ActionLog(
     @Serializable(with = LocalDateTimeSerializer::class) val timestamp: LocalDateTime = LocalDateTime.now(),
     val type: String,
     val source: String,
+    val traceId: String = "",
     val summary: String,
-    val detail: String = ""
+    val detail: String = "",
+    val changes: List<Change> = emptyList()
 ) {
     companion object {
         private var counter = 0
     }
 }
+
+/** 字段变化记录，用于 UPDATE 等操作追踪旧值→新值 */
+@Serializable
+data class Change(
+    val field: String,
+    val oldValue: String? = null,
+    val newValue: String? = null
+)
 
 /** 操作类型，每个对应一个 emoji 图标，方便时间轴快速识别 */
 object LogType {
@@ -49,11 +61,15 @@ object LogType {
     const val CALENDAR = "calendar"       // 📅 日历同步
     const val REPORT = "report"           // 📊 日报播报
     const val SYSTEM = "system"           // 🔄 系统自动操作
+    const val AI_TOOL_CALL = "ai_tool_call"  // 🛠️ AI 调用单个工具
+    const val AI_RAW_OUTPUT = "ai_raw_output" // 📦 AI 原始返回 JSON
 
     fun emoji(type: String): String = when (type) {
         AI_INPUT -> "📨"
         AI_OUTPUT -> "🤖"
         AI_TOOL -> "🔧"
+        AI_TOOL_CALL -> "🛠️"
+        AI_RAW_OUTPUT -> "📦"
         CREATE -> "➕"
         COMPLETE -> "✅"
         DELETE -> "🗑️"

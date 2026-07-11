@@ -102,9 +102,9 @@ fun ReportViewScreen(reports: List<ReportEntry>, onDismiss: () -> Unit) {
                         }
 
                         // Section header：以常见 emoji 开头
-                        trimmed.matches(Regex("^[📋🔥💡📊🗓️💌📈🎯💎🔔⚡✅].*")) -> {
-                            Text(trimmed, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                        trimmed.matches(Regex("^[📋🔥💡📊🗓️💌📈🎯💎🔔⚡✅📅⚠️].*")) -> {
+                            Text(trimmed, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
                         }
 
                         // 一般列表项（以 - 开头）
@@ -166,9 +166,9 @@ private fun renderTaskLine(line: String, isMorning: Boolean) {
     }.trim().removePrefix(":").trim()
 
     Column(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("● ", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-            if (priorityEmoji.isNotEmpty()) { Text(priorityEmoji, fontSize = 14.sp); Spacer(Modifier.width(4.dp)) }
+        Row(verticalAlignment = Alignment.Top) {
+            Text("● ", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
+            if (priorityEmoji.isNotEmpty()) { Text(priorityEmoji, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp)); Spacer(Modifier.width(4.dp)) }
             Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         }
         if (detailText.isNotBlank()) {

@@ -66,11 +66,13 @@ class ForegroundService : Service() {
             } else {
                 context.startService(intent)
             }
+            com.example.aitodoapp.data.AppLogger.foregroundServiceStarted()
         }
 
         /** 停止前台保活服务 */
         fun stop(context: Context) {
             context.stopService(Intent(context, ForegroundService::class.java))
+            com.example.aitodoapp.data.AppLogger.foregroundServiceStopped()
         }
 
         /**

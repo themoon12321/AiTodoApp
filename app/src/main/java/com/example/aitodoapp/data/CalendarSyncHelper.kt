@@ -82,24 +82,28 @@ object CalendarSyncHelper {
             try {
                 val eid = if (time != null) insertTimedEvent(context, title, date, time, durationMinutes, calId, reminderMinutes)
                           else insertAllDayEvent(context, title, date, calId, reminderMinutes)
-                if (eid != null) return eid
-            } catch (_: Exception) {}
+                if (eid != null) { AppLogger.calendarEventCreated(title); return eid }
+            } catch (_: Exception) { AppLogger.calendarSyncError(title, "主日历ID=$calId 写入失败") }
             cachedCalendarId = -1
         }
         for (id in 1L..5L) {
             try {
                 val eid = if (time != null) insertTimedEvent(context, title, date, time, durationMinutes, id, reminderMinutes)
                           else insertAllDayEvent(context, title, date, id, reminderMinutes)
-                if (eid != null) { cachedCalendarId = id; return eid }
+                if (eid != null) { cachedCalendarId = id; AppLogger.calendarEventCreated(title); return eid }
             } catch (_: Exception) { continue }
         }
+        AppLogger.calendarSyncError(title, "所有日历ID均写入失败")
         return null
     }
 
-    fun deleteEvent(context: Context, eventId: Long) {
+    fun deleteEvent(context: Context, eventId: Long, taskTitle: String = "") {
         try {
             context.contentResolver.delete(CalendarContract.Reminders.CONTENT_URI, "event_id = ?", arrayOf(eventId.toString()))
             context.contentResolver.delete(CalendarContract.Events.CONTENT_URI, "_id = ?", arrayOf(eventId.toString()))
-        } catch (_: Exception) {}
+            AppLogger.calendarEventDeleted(taskTitle.ifBlank { "ID=$eventId" })
+        } catch (_: Exception) {
+            AppLogger.calendarSyncError(taskTitle.ifBlank { "ID=$eventId" }, "删除失败")
+        }
     }
 }

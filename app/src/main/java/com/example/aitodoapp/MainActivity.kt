@@ -32,6 +32,7 @@ import com.example.aitodoapp.data.TaskRepository
 import com.example.aitodoapp.data.TokenRepository
 import com.example.aitodoapp.model.ReportEntry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.example.aitodoapp.ui.screens.ArchiveScreen
 import com.example.aitodoapp.ui.screens.SettingsScreen
@@ -39,7 +40,9 @@ import com.example.aitodoapp.ui.screens.TagManagerScreen
 import com.example.aitodoapp.ui.screens.TaskScreen
 import com.example.aitodoapp.ui.theme.AiTodoAppTheme
 import kotlinx.serialization.Serializable
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
@@ -186,6 +189,15 @@ class MainActivity : ComponentActivity() {
                 com.example.aitodoapp.data.NotificationRefreshWorker.start(applicationContext)
             } catch (_: Exception) {}
         }
+        // 清理旧版 PeriodicWorkRequest 残留（版本升级安全）
+        com.example.aitodoapp.data.ReportWorker.cleanupLegacy(applicationContext)
+        // 恢复播报调度：WorkManager DB 被清或强杀后自动恢复
+        if (SettingsRepository.load().reportEnabled) {
+            try {
+                com.example.aitodoapp.data.ReportWorker.scheduleNext(applicationContext, true)
+                com.example.aitodoapp.data.ReportWorker.scheduleNext(applicationContext, false)
+            } catch (_: Exception) {}
+        }
         if (intent?.getBooleanExtra("open_report", false) == true) {
             openReportTrigger = true
             intent.removeExtra("open_report")
@@ -220,6 +232,16 @@ fun AppMain(viewModel: MainViewModel = viewModel(), openReportTrigger: Boolean =
     val context = LocalContext.current
     LaunchedEffect(Unit) { viewModel.initialize() }
     LaunchedEffect(viewModel.tab) { viewModel.refreshSettings() }
+    // 自动归档：精确计算到下次午夜的时间，跨午夜后自动触发
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = LocalDateTime.now()
+            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay()
+            val msUntilMidnight = Duration.between(now, nextMidnight).toMillis()
+            if (msUntilMidnight > 0) delay(msUntilMidnight)
+            viewModel.checkAutoArchive()
+        }
+    }
 
     Scaffold(bottomBar = {
         NavigationBar {
@@ -241,13 +263,59 @@ fun AppMain(viewModel: MainViewModel = viewModel(), openReportTrigger: Boolean =
             3 -> SettingsScreen(Modifier.padding(innerPadding), onTestReport = { isMorning ->
                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         try {
-                            val aiTasks = (viewModel.tasks + viewModel.overdueTasks).distinctBy { it.id }
-                            val descs = aiTasks.map { t ->
-                                val p = when { t.isCompleted -> "[已完成] "; viewModel.overdueTasks.any { o -> o.id == t.id } -> "[过期] "; else -> "" }
-                                p + formatTaskForAi(t, today)
+                            val allTasks = viewModel.tasks.filter { !it.isArchived && !it.isDeleted }
+                            val today = viewModel.today
+
+                            fun taskLine(t: Task): String {
+                                val parts = mutableListOf(t.title)
+                                parts.add("${t.priority.emoji}${t.priority.label}(${t.priority.name})")
+                                if (t.deadline != null) parts.add("截止:${t.deadline.format(java.time.format.DateTimeFormatter.ofPattern("M/d"))}")
+                                if (t.tags.isNotEmpty()) parts.add("🏷${t.tags.joinToString(",")}")
+                                if (t.plannedDates.isNotEmpty()) {
+                                    val pd = t.plannedDates.sorted().joinToString(",") { it.format(java.time.format.DateTimeFormatter.ofPattern("M/d")) }
+                                    parts.add("计划:$pd")
+                                }
+                                if (t.isCompleted) parts.add("[已完成]")
+                                return parts.joinToString(" | ")
                             }
+
+                            val dow = today.dayOfWeek.value
+                            val monday = today.minusDays((dow - 1).toLong())
+                            val sunday = monday.plusDays(6)
+                            val nextMonday = sunday.plusDays(1)
+                            val nextSunday = nextMonday.plusDays(6)
+                            val pending = allTasks.filter { !it.isCompleted }
+
+                            val todayTasks = pending.filter { it.deadline == today || it.plannedDates.contains(today) }
+                            val thisWeekTasks = pending.filter { it.deadline != null && !it.deadline.isBefore(monday) && !it.deadline.isAfter(sunday) && it.deadline != today }
+                            val overdueTasks = pending.filter { it.deadline != null && it.deadline < today }
+                            val showNextWeek = dow >= 4
+                            val nextWeekTasks = if (showNextWeek) pending.filter { it.deadline != null && !it.deadline.isBefore(nextMonday) && !it.deadline.isAfter(nextSunday) } else emptyList()
+
+                            val lines = mutableListOf<String>()
+                            lines.add("📋 今日任务")
+                            if (todayTasks.isEmpty()) lines.add("（暂无今日任务安排）")
+                            else todayTasks.forEach { lines.add("- ${taskLine(it)}") }
+                            lines.add("")
+                            lines.add("📋 本周剩余任务概览（明天～${sunday.monthValue}/${sunday.dayOfMonth}）")
+                            if (thisWeekTasks.isEmpty()) lines.add("（暂无本周剩余任务）")
+                            else thisWeekTasks.forEach { lines.add("- ${taskLine(it)}") }
+                            if (overdueTasks.isNotEmpty()) {
+                                lines.add("")
+                                lines.add("⚠️ 过期任务")
+                                overdueTasks.forEach { t ->
+                                    val days = java.time.temporal.ChronoUnit.DAYS.between(t.deadline, today)
+                                    lines.add("- ${taskLine(t)} · 已过期${days}天")
+                                }
+                            }
+                            if (nextWeekTasks.isNotEmpty()) {
+                                lines.add("")
+                                lines.add("📅 下周任务预览（${nextMonday.monthValue}/${nextMonday.dayOfMonth}～${nextSunday.monthValue}/${nextSunday.dayOfMonth}）")
+                                nextWeekTasks.forEach { lines.add("- ${taskLine(it)}") }
+                            }
+
                             val tags = viewModel.allTags.map { it.name }
-                            val result = AiService.generateDailyReport(descs, tags, isMorning)
+                            val result = AiService.generateDailyReport(lines, tags, isMorning)
                             if (result.error == null) {
                                 val entry = com.example.aitodoapp.model.ReportEntry(result.text, isMorning, today.toString())
                                 com.example.aitodoapp.data.ReportRepository.addReport(entry)
@@ -259,10 +327,8 @@ fun AppMain(viewModel: MainViewModel = viewModel(), openReportTrigger: Boolean =
                     }
                 }, onScheduleReport = { isMorning ->
                     com.example.aitodoapp.data.ReportWorker.schedule(context, isMorning, 1)
-                }, onScheduleDaily = { isMorning, hour, minute ->
-                    com.example.aitodoapp.data.ReportWorker.scheduleDaily(context, isMorning, hour, minute)
                 }, onRestoreTask = { id -> viewModel.restoreTask(id) },
-                onPermanentDelete = { id -> viewModel.permanentDelete(id) })
+                onPermanentDelete = { id, title -> viewModel.permanentDelete(id, title = title) })
         }
     }
 }

@@ -101,6 +101,7 @@ fun TaskScreen(
     var aiStatus by remember { mutableStateOf("") }
     var aiDoneMessage by remember { mutableStateOf("") }
     var pendingRetryInput by remember { mutableStateOf("") }
+    var retryCount by remember { mutableStateOf(0) }
     val chatFocus = remember { FocusRequester() }
     // 播报状态
     var showReportView by remember { mutableStateOf(false) }
@@ -109,54 +110,122 @@ fun TaskScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     // 共享的 AI 结果处理逻辑（避免两处重复）
-    fun processAiResult(result: com.example.aitodoapp.data.AiResult, aiTaskList: List<Task>, userInput: String = "") {
+    // 记录 AI 完整链路：原始返回 → 逐条工具调用 → 工具执行结果 → AI 回复
+    fun processAiResult(result: com.example.aitodoapp.data.AiResult, aiTaskList: List<Task>, archivedTaskList: List<Task> = emptyList(), userInput: String = "", traceId: String = "") {
+        retryCount = 0  // AI 调用成功 → 重置重试计数
         aiReply = result.text
-        // 记录 AI 输出日志：返回文本 + 调用了哪些工具 + token 消耗
-        val toolNames = result.actions.joinToString(", ") { it::class.simpleName ?: "?" }
-        val tokenInfo = if (result.promptTokens + result.completionTokens > 0) " | token: ${result.promptTokens}+${result.completionTokens}" else ""
-        val aiDetail = buildString {
-            if (userInput.isNotBlank()) append("输入：$userInput\n")
-            append("回复：${result.text.take(200)}")
-            if (toolNames.isNotBlank()) append("\n工具：$toolNames")
-            append(tokenInfo)
+
+        // 1. 记录 AI 原始返回（完整响应 JSON）
+        if (result.rawResponse.isNotBlank()) {
+            val tokenInfo = if (result.promptTokens + result.completionTokens > 0) "token: ${result.promptTokens}+${result.completionTokens}" else ""
+            com.example.aitodoapp.data.ActionLogRepository.add(
+                com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_RAW_OUTPUT, source = "AI",
+                    traceId = traceId, summary = "AI 原始返回（${tokenInfo}）", detail = result.rawResponse)
+            )
         }
+
+        // 2. 逐条记录工具调用和执行结果
+        fun toolCallSummary(action: com.example.aitodoapp.data.AiAction): String = when (action) {
+            is AiAction.CreateTask -> buildString {
+                append("title: ${action.title}")
+                if (action.deadline != null) append(", deadline: ${action.deadline}")
+                if (action.deadlineTime != null) append(", time: ${action.deadlineTime}")
+                if (action.priority != com.example.aitodoapp.Priority.P3) append(", pri: ${action.priority}")
+                if (action.tags.isNotEmpty()) append(", tags: ${action.tags.joinToString(",")}")
+                if (action.content.isNotBlank()) append(", content: ${action.content.take(50)}")
+                if (action.plannedDates.isNotEmpty()) append(", planned: ${action.plannedDates.joinToString(",")}")
+                if (action.estimatedMinutes != null) append(", est: ${action.estimatedMinutes}min")
+            }
+            is AiAction.CompleteTask -> buildString {
+                append("title: ${action.title}")
+                if (action.deadline != null) append(", deadline: ${action.deadline}")
+                if (action.tags != null) append(", tags: ${action.tags.joinToString(",")}")
+            }
+            is AiAction.DeleteTask -> buildString {
+                append("title: ${action.title}")
+                if (action.deadline != null) append(", deadline: ${action.deadline}")
+            }
+            is AiAction.UpdateTask -> buildString {
+                append("match: ${action.title}")
+                if (action.newTitle != null) append(", new_title: ${action.newTitle}")
+                if (action.priority != null) append(", pri: ${action.priority}")
+                if (action.deadline != null) append(", deadline: ${action.deadline}")
+                if (action.tags != null) append(", tags: ${action.tags.joinToString(",")}")
+            }
+            is AiAction.CompletedTasks -> "查看已完成任务"
+            is AiAction.UpdateSettings -> buildString {
+                append("settings: ")
+                if (action.apiUrl != null) append("api_url, ")
+                if (action.apiKey != null) append("api_key, ")
+                if (action.model != null) append("model, ")
+                if (action.showOverdueInline != null) append("show_overdue, ")
+                if (action.longPressChat != null) append("long_press, ")
+                if (action.showTokenUsage != null) append("show_tokens, ")
+                if (action.autoSyncCalendar != null) append("auto_sync, ")
+                if (action.defaultReminderMinutes != null) append("reminder, ")
+            }
+            is AiAction.ManageTag -> "${action.action} tag: ${action.tagName}"
+            is AiAction.ArchiveTask -> buildString {
+                append("title: ${action.title}")
+                if (action.completedAt != null) append(", completed_at: ${action.completedAt}")
+            }
+            is AiAction.UnarchiveTask -> "title: ${action.title}"
+        }
+
+        var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
+        viewModel.beginBatch()
+        try {
+            for (action in result.actions) {
+                // 2a. 记录工具调用
+                val actionName = action::class.simpleName ?: "?"
+                com.example.aitodoapp.data.ActionLogRepository.add(
+                    com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_TOOL_CALL, source = "AI",
+                        traceId = traceId, summary = "AI → $actionName", detail = toolCallSummary(action))
+                )
+                // 2b. 执行工具（带 traceId，执行结果会自动关联到同一条追踪链）
+                when (action) {
+                    is AiAction.CreateTask -> { viewModel.addTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime, action.estimatedMinutes, traceId); created++ }
+                    is AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.completeTask(it.id, traceId) }; completed++ }
+                    is AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.deleteTask(it.id, traceId) }; deleted++ }
+                    is AiAction.UpdateTask -> {
+                        val task = findBestMatch(aiTaskList, action.toMatchCriteria())
+                        if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
+                            viewModel.updateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, action.deadlineTime, action.plannedTimes ?: emptyList(), null, traceId); updated++
+                        }
+                    }
+                    is AiAction.CompletedTasks -> {
+                        val done = aiTaskList.filter { it.isCompleted }
+                        aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
+                    }
+                    is AiAction.UpdateSettings -> {
+                        val cur = SettingsRepository.load()
+                        val upd = cur.copy(apiUrl = action.apiUrl ?: cur.apiUrl, apiKey = action.apiKey ?: cur.apiKey, model = action.model ?: cur.model, showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline, longPressChat = action.longPressChat ?: cur.longPressChat, showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage, autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar, defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes)
+                        SettingsRepository.save(upd); viewModel.refreshSettings(); settingsChanged++
+                    }
+                    is AiAction.ManageTag -> {
+                        when (action.action) {
+                            "create" -> viewModel.createTag(action.tagName, traceId)
+                            "delete" -> viewModel.deleteTag(action.tagName, traceId)
+                            "promote" -> viewModel.promoteTag(action.tagName, traceId)
+                        }
+                        tagged++
+                    }
+                    is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.archiveTask(it.id, action.completedAt, traceId) }; archived++ }
+                    is AiAction.UnarchiveTask -> { findBestMatch(archivedTaskList.ifEmpty { aiTaskList }, action.toMatchCriteria())?.let { viewModel.unarchiveTask(it.id, traceId) }; unarchived++ }
+                }
+            }
+        } finally {
+            viewModel.endBatch()
+        }
+
+        // 3. 记录 AI 回复文本（完整，不截断）
+        val tokenInfoFull = if (result.promptTokens + result.completionTokens > 0) " | token: ${result.promptTokens}+${result.completionTokens}" else ""
         com.example.aitodoapp.data.ActionLogRepository.add(
             com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_OUTPUT, source = "AI",
-                summary = "AI回复：${result.text.take(30)}${if (result.text.length > 30) "..." else ""}", detail = aiDetail)
+                traceId = traceId, summary = "AI 回复", detail = "${result.text}${tokenInfoFull}")
         )
-        var created = 0; var completed = 0; var deleted = 0; var updated = 0; var settingsChanged = 0; var tagged = 0; var archived = 0; var unarchived = 0
-        for (action in result.actions) {
-            when (action) {
-                is AiAction.CreateTask -> { viewModel.addTask(action.title, action.priority, action.deadline, action.tags, action.content, action.plannedDates, action.deadlineTime, action.estimatedMinutes); created++ }
-                is AiAction.CompleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.completeTask(it.id) }; completed++ }
-                is AiAction.DeleteTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.deleteTask(it.id) }; deleted++ }
-                is AiAction.UpdateTask -> {
-                    val task = findBestMatch(aiTaskList, action.toMatchCriteria())
-                    if (task != null && (action.newTitle != null || action.priority != null || action.deadline != null || action.tags != null || action.plannedDates != null || action.deadlineTime != null || action.plannedTimes != null)) {
-                        viewModel.updateTask(task.id, action.newTitle ?: task.title, task.content, action.priority ?: task.priority, action.deadline ?: task.deadline, action.tags ?: task.tags, action.plannedDates ?: task.plannedDates, action.priority != null && action.priority != task.priority, action.deadlineTime, action.plannedTimes ?: emptyList(), null); updated++
-                    }
-                }
-                is AiAction.CompletedTasks -> {
-                    val done = aiTaskList.filter { it.isCompleted }
-                    aiReply = "已完成的任务（${done.size}个）：\n" + done.joinToString("\n") { "- ${it.title}" }
-                }
-                is AiAction.UpdateSettings -> {
-                    val cur = SettingsRepository.load()
-                    val upd = cur.copy(apiUrl = action.apiUrl ?: cur.apiUrl, apiKey = action.apiKey ?: cur.apiKey, model = action.model ?: cur.model, showOverdueInline = action.showOverdueInline ?: cur.showOverdueInline, longPressChat = action.longPressChat ?: cur.longPressChat, showTokenUsage = action.showTokenUsage ?: cur.showTokenUsage, autoSyncCalendar = action.autoSyncCalendar ?: cur.autoSyncCalendar, defaultReminderMinutes = action.defaultReminderMinutes ?: cur.defaultReminderMinutes)
-                    SettingsRepository.save(upd); viewModel.refreshSettings(); settingsChanged++
-                }
-                is AiAction.ManageTag -> {
-                    when (action.action) {
-                        "create" -> viewModel.createTag(action.tagName)
-                        "delete" -> viewModel.deleteTag(action.tagName)
-                        "promote" -> viewModel.promoteTag(action.tagName)
-                    }
-                    tagged++
-                }
-                is AiAction.ArchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.archiveTask(it.id, action.completedAt) }; archived++ }
-                is AiAction.UnarchiveTask -> { findBestMatch(aiTaskList, action.toMatchCriteria())?.let { viewModel.unarchiveTask(it.id) }; unarchived++ }
-            }
-        }
+
+        // 4. 构建通知摘要（保持原有逻辑）
         val parts = mutableListOf<String>(); val details = mutableListOf<String>()
         if (created > 0) { parts.add("📝添加了${created}个任务"); val a = result.actions.firstOrNull { it is AiAction.CreateTask } as? AiAction.CreateTask; if (a != null) { var d = a.title; if (a.deadline != null) d += " 截止${a.deadline?.format(DateTimeFormatter.ofPattern("M月d日")) ?: ""}"; if (a.deadlineTime != null) d += " ${a.deadlineTime}"; details.add(d) } }
         if (completed > 0) { parts.add("✅完成了${completed}个任务"); details.add(result.actions.filterIsInstance<AiAction.CompleteTask>().firstOrNull()?.title ?: "") }
@@ -202,20 +271,25 @@ fun TaskScreen(
         }
     }
 
-    // 切后台网络失败后，回到前台自动重试
+    // 切后台网络失败后，回到前台自动重试（独立 traceId，视为一次新的请求）
     val retryLifecycle = LocalLifecycleOwner.current
     LaunchedEffect(retryLifecycle, pendingRetryInput) {
         if (pendingRetryInput.isNotEmpty()) {
+            // 防御：如果重试次数已达上限，直接停止
+            if (retryCount >= 3) {
+                aiReply = "⚠️ 多次重试失败，请稍后再试"
+                pendingRetryInput = ""
+                return@LaunchedEffect
+            }
             retryLifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 val input = pendingRetryInput
                 pendingRetryInput = ""
+                val traceId = "ai_${System.currentTimeMillis()}"
                 aiLoading = true; aiReply = ""; aiStatus = "🔄 自动重试..."
                 delay(500)
-                val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
+                val aiTaskList = tasks
                 val taskDescriptions = aiTaskList.map { t ->
                     val prefix = when {
-                        t.isDeleted -> "[已删除] "
-                        t.isArchived -> "[已归档] "
                         t.isCompleted -> "[已完成] "
                         overdueTasks.any { it.id == t.id } -> "[过期] "
                         else -> ""
@@ -227,19 +301,43 @@ fun TaskScreen(
                 TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                 withContext(Dispatchers.Main) {
                                     if (result.error != null) {
+                                        // 重试失败也记录输入日志
+                                        com.example.aitodoapp.data.ActionLogRepository.add(
+                                            com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_INPUT, source = "AI",
+                                                traceId = traceId, summary = "用户输入：$input（重试失败）",
+                                                detail = buildString {
+                                                    appendLine("=== 错误 ===")
+                                                    appendLine(result.error ?: "未知错误")
+                                                    if (result.rawRequest.isNotBlank()) { appendLine("=== 完整请求 JSON ==="); append(result.rawRequest) }
+                                                })
+                                        )
                                         // 网络类瞬时错误才保留待重试；配置类错误直接提示用户去设置
                                         val transient = result.error.contains("超时") || result.error.contains("无法连接") ||
                                             result.error.contains("网络异常") || result.error.contains("服务器内部错误")
                                         if (transient) {
-                                            pendingRetryInput = input
-                                            aiReply = "⚠️ ${result.error}，回到前台自动重试..."
+                                            if (retryCount >= 3) {
+                                                aiReply = "⚠️ 多次重试失败，请稍后再试"
+                                            } else {
+                                                retryCount++
+                                                pendingRetryInput = input
+                                                aiReply = "⚠️ ${result.error}，回到前台自动重试..."
+                                            }
                                         } else {
                                             aiReply = "⚠️ ${result.error}"
                                         }
                                         aiLoading = false; aiStatus = ""; return@withContext
                                     }
+                                    // 记录完整输入日志
+                                    com.example.aitodoapp.data.ActionLogRepository.add(
+                                        com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_INPUT, source = "AI",
+                                            traceId = traceId, summary = "用户输入：$input（重试）",
+                                            detail = buildString {
+                                                appendLine("用户输入：$input")
+                                                if (result.rawRequest.isNotBlank()) { appendLine("=== 完整请求 JSON ==="); append(result.rawRequest) }
+                                            })
+                                    )
                                     aiReply = result.text
-                                    processAiResult(result, aiTaskList, input)
+                                    processAiResult(result, aiTaskList, viewModel.archivedTasks, input, traceId)
                                 }
             }
         }
@@ -366,10 +464,12 @@ fun TaskScreen(
                     Button(onClick = {
                         val t = chatInput.trim()
                         if (t.isNotBlank() && !aiLoading) {
+                            retryCount = 0  // 用户新输入 → 重置重试计数
+                            val traceId = "ai_${System.currentTimeMillis()}"
                             aiLoading = true; aiReply = ""; aiStatus = "🔄 正在连接 AI..."
                             scope.launch(Dispatchers.IO) {
                                 try {
-                                    val aiTaskList = (tasks + overdueTasks).distinctBy { it.id }
+                                    val aiTaskList = tasks
                                     val taskDescriptions = aiTaskList.map { t ->
                                         val prefix = when {
                                             t.isCompleted -> "[已完成] "
@@ -378,25 +478,47 @@ fun TaskScreen(
                                         }; prefix + formatTaskForAi(t, today)
                                     }
                                     val tagNames = allTags.map { it.name }
-                                    com.example.aitodoapp.data.ActionLogRepository.add(
-                                        com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_INPUT, source = "AI", summary = "用户输入：$t", detail = t)
-                                    )
+                                    // 先调用 AI，拿到结果后才写日志（因为需要完整的请求/响应 JSON）
                                     val result = AiService.processMessage(t, taskDescriptions, tagNames)
                                     TokenRepository.recordUsage(result.promptTokens, result.completionTokens)
                                     scope.launch(Dispatchers.Main) {
                                         if (result.error != null) {
+                                            // 即使是错误也记录输入日志
+                                            com.example.aitodoapp.data.ActionLogRepository.add(
+                                                com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_INPUT, source = "AI",
+                                                    traceId = traceId, summary = "用户输入：$t（失败）",
+                                                    detail = buildString {
+                                                        appendLine("=== 错误 ===")
+                                                        appendLine(result.error)
+                                                        if (result.rawRequest.isNotBlank()) { appendLine("=== 完整请求 JSON ==="); append(result.rawRequest) }
+                                                    })
+                                            )
                                             val transient = result.error.contains("超时") || result.error.contains("无法连接") ||
                                                 result.error.contains("网络异常") || result.error.contains("服务器内部错误")
                                             if (transient) {
-                                                pendingRetryInput = t
-                                                aiReply = "⚠️ ${result.error}，回到前台自动重试..."
+                                                if (retryCount >= 3) {
+                                                    aiReply = "⚠️ 多次重试失败，请稍后再试"
+                                                } else {
+                                                    retryCount++
+                                                    pendingRetryInput = t
+                                                    aiReply = "⚠️ ${result.error}，回到前台自动重试..."
+                                                }
                                             } else {
                                                 aiReply = "⚠️ ${result.error}"
                                             }
                                             aiLoading = false; aiStatus = ""; return@launch
                                         }
+                                        // 记录完整输入日志（含完整请求 JSON）
+                                        com.example.aitodoapp.data.ActionLogRepository.add(
+                                            com.example.aitodoapp.data.ActionLog(type = com.example.aitodoapp.data.LogType.AI_INPUT, source = "AI",
+                                                traceId = traceId, summary = "用户输入：$t",
+                                                detail = buildString {
+                                                    appendLine("用户输入：$t")
+                                                    if (result.rawRequest.isNotBlank()) { appendLine("=== 完整请求 JSON ==="); append(result.rawRequest) }
+                                                })
+                                        )
                                         aiReply = result.text
-                                        processAiResult(result, aiTaskList, t)
+                                        processAiResult(result, aiTaskList, viewModel.archivedTasks, t, traceId)
                                     }
                                 } catch (_: kotlinx.coroutines.CancellationException) { aiLoading = false; aiStatus = "" }
                                 catch (e: Exception) { scope.launch(Dispatchers.Main) { aiReply = "出错了：${e.message}"; aiLoading = false; aiStatus = "" } }

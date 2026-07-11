@@ -41,17 +41,18 @@ object AiService {
 
         val requestJson = buildRequestJson(userMessage, taskList, tagList, settings.model)
         val http = httpPost(settings.apiUrl, settings.apiKey, requestJson)
-        http.error?.let { return AiResult(it, error = it) }
-        val responseBody = http.body ?: return AiResult("网络请求失败：响应为空", error = "empty_response")
+        http.error?.let { return AiResult(it, error = it, rawRequest = requestJson) }
+        val responseBody = http.body ?: return AiResult("网络请求失败：响应为空", error = "empty_response", rawRequest = requestJson)
 
-        return parseResponse(responseBody)
+        val result = parseResponse(responseBody)
+        return result.copy(rawRequest = requestJson, rawResponse = responseBody)
     }
 
     fun generateDailyReport(currentTasks: List<String>, currentTags: List<String>, isMorning: Boolean): AiResult {
         val settings = SettingsRepository.load()
         if (settings.apiKey.isBlank()) return AiResult("请先在设置页填写 API Key", error = "no_api_key")
 
-        val taskList = currentTasks.joinToString("\n") { "- $it" }.ifEmpty { "（暂无任务）" }
+        val taskList = currentTasks.joinToString("\n").ifEmpty { "（暂无任务）" }
         val tagList = currentTags.joinToString("\n") { "- $it" }.ifEmpty { "（暂无标签）" }
 
         val requestJson = buildReportRequestJson(isMorning, taskList, tagList, settings.model)
@@ -365,43 +366,34 @@ $tagList
         val dayOfWeekChinese = dayNames[today.dayOfWeek.value]
         val period = if (isMorning) "早间" else "晚间"
         val emoji = if (isMorning) "🌅" else "🌙"
-        val eveningSummary = if (!isMorning) "📊 今日任务小结\n- 已完成: 1项 | 总任务: 5项 | 待办: 4项\n- 完成率: 20% 🎯\n" else ""
 
-        val systemPrompt = """你是 AI 代办助手。根据当前任务列表生成${period}播报。
-严格按照下面的格式输出。
+        val systemPrompt = """你是 AI 代办助手。根据下面已按分类整理好的任务数据生成${period}播报。
 
 ---
 ${emoji} ${period}代办报告 · ${today}（星期$dayOfWeekChinese）
 ---
 
-📋 今日待办提醒
-${if (isMorning) "暂无当日截止任务，好好规划今天的工作吧！" else "回顾今天的完成情况。"}
-
-🔥 本周紧急任务（截止本周内）
-● 交大物实验报告, 优先级: P0🔥, 截止: 7/3（周四）, 预估: 2h
-● 买数据线, 优先级: P4⚪, 截止: 7/5（周六）, 预估: 0.5h
-
-⚠️ 过期任务提醒（请尽快处理）
-● 洗衣服, 优先级: P2🟡, 已过期 2天, 预估: 1h
-
-${eveningSummary}---
-💡 ${if (isMorning) "早间" else "智能"}小贴士
+（任务数据分类已由代码生成，直接原样输出每个分类下的所有内容，不要增减不要重新分类）
+（过期任务行包含"已过期X天"，直接保留）
+（任务数据中空分类（写有"暂无"的）直接输出"暂无"那句即可）
+---
+💡 智能小贴士
 📌 今日重点：根据任务优先级给出具体可行的建议
-⏰ 时间分配：给出上午/下午/晚间的分段时间安排
+⏰ 时间分配：给出时间分段安排
 🌟 温馨提示：有温度有情绪的鼓励语
 
 ---
 💬 ${if (isMorning) "根据任务情况写一句独一无二的早安问候，不要客套，可以带点俏皮、温暖或务实的语气，符合今天的任务状态" else "根据今天完成情况写一句温暖的晚安问候，具体到今天的任务表现，不套路"}
 
 规则：
-- 任务较多时只列出最关键的前5项
-- 没有任务时写"暂无当日截止任务"等自然文案
-- ● 行格式：● 任务名称, 优先级: PX+emoji, 截止: 日期, 预估: Xh
-- 过期任务写"已过期 X天"而非截止日期
+- 直接按下面【当前任务列表】里的分类和内容原样输出，每类一行不改
+- 分类标题（📋 ⚠️ 📅）直接保留，不要加额外括号或符号
+- - 开头的列表项统一改成 ● 开头，保持其余内容不变
+- 过期任务行中如果包含"已过期X天"，直接保留在原位
 - 💡 小贴士的 📌⏰🌟 不需要前置 - 符号
 - 💬 行结合当天具体任务写，不写通用祝福语
 
-当前任务列表：
+当前任务列表（已按分类整理）：
 $taskList
 
 现有标签：

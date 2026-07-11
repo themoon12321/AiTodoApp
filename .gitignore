@@ -17,9 +17,9 @@ local.properties
 # Agent 开发日志和配置文件（本地使用，不上传 GitHub）
 AGENTS.md
 CLAUDE.md
-CLAUDE_CODE_DEV_LOG.md
 CLAUDE_REFACTOR_VIEWMODEL.md
 HANDOFF.md
-codex开发日志.md
-GLM开发日志.md
-claudecode开发日志.md
+开发日志.md
+
+# 宣传视频素材（本地生成，不上传 GitHub）
+promo/
