@@ -52,22 +52,37 @@ object NotificationContent {
         }
 
         // 选「下一个该做的」
-        val next = pickNextTask(pending, today) ?: return Content("今天全搞定啦！🎉", GagPool.pick(GagPool.celebrate))
+        val next = pickNextTask(pending, today, now) ?: return Content("今天全搞定啦！🎉", GagPool.pick(GagPool.celebrate))
 
-        // 2. 有过期任务
-        val isOverdue = next.deadline != null && next.deadline < today
+        // 2. 判断是否已过期（同日截止且过了截止时间也算）
+        val isOverdue = overdueCheck(next, today, now)
         if (isOverdue) {
-            val days = ChronoUnit.DAYS.between(next.deadline, today)
-            val title = "⚠️ ${next.title} · 过期${days}天"
+            val title = if (next.deadline!! < today) {
+                val days = ChronoUnit.DAYS.between(next.deadline, today)
+                "⚠️ ${next.title} · 过期${days}天"
+            } else {
+                val hoursPast = try {
+                    val target = LocalTime.parse(next.deadlineTime)
+                    -ChronoUnit.MINUTES.between(now, target).toDouble() / 60.0
+                } catch (_: Exception) { 0.0 }
+                if (hoursPast < 1.0) "⚠️ ${next.title} · 刚刚过期"
+                else "⚠️ ${next.title} · 过期${hoursPast.toInt()}小时"
+            }
             return Content(title, GagPool.pick(GagPool.overdue))
         }
 
-        // 3. 今日截止且 ≤1h（有截止时间才算）
+        // 3. 今日截止且 ≤1h（有截止时间才算，且还没到截止时间）
         val hoursLeft = hoursUntilDeadline(next, today, now)
-        if (hoursLeft != null && hoursLeft <= 1.0) {
-            val title = if (next.deadlineTime != null) "${next.title} · ${next.deadlineTime}截止"
-                        else "${next.title} · 今天截止"
-            return Content(title, GagPool.pick(GagPool.urgent))
+        if (hoursLeft != null && hoursLeft > 0 && hoursLeft <= 1.0) {
+            val title = "${next.title} · ${next.deadlineTime}截止"
+            val minutesLeft = (hoursLeft * 60).toInt()
+            val subtext = when {
+                minutesLeft <= 5  -> "⚠️ 只剩${minutesLeft}分钟，就是现在！"
+                minutesLeft <= 15 -> "⚠️ 还有${minutesLeft}分钟，赶紧的！"
+                minutesLeft <= 30 -> "⚠️ 还有${minutesLeft}分钟，抓紧别分心"
+                else              -> "⚠️ 还有${minutesLeft}分钟，该收尾了"
+            }
+            return Content(title, subtext)
         }
 
         // 4. 普通任务
@@ -88,20 +103,32 @@ object NotificationContent {
         return now.hour >= QUIET_START && now.hour < QUIET_END
     }
 
+    /** 判断任务是否已过期（比日期+比时间） */
+    private fun overdueCheck(task: Task, today: LocalDate, now: LocalTime): Boolean {
+        if (task.deadline == null) return false
+        if (task.deadline < today) return true          // 昨天及之前 → 肯定过期
+        if (task.deadline == today && task.deadlineTime != null) {
+            return try {
+                LocalTime.parse(task.deadlineTime).isBefore(now)  // 今天且过了截止时间 → 过期
+            } catch (_: Exception) { false }
+        }
+        return false
+    }
+
     /**
      * 从待办里挑「下一个该做的」。优先级：
      * 过期 > 今日截止 > 有截止日期 > 有计划日期 > 其他；同级按 priority 序号（P0 最前）。
      */
-    private fun pickNextTask(pending: List<Task>, today: LocalDate): Task? {
+    private fun pickNextTask(pending: List<Task>, today: LocalDate, now: LocalTime): Task? {
         if (pending.isEmpty()) return null
         return pending.sortedWith(
             compareBy<Task> { task ->
                 when {
-                    task.deadline != null && task.deadline < today -> 0   // 过期最急
-                    task.deadline == today -> 1                          // 今日截止
-                    task.deadline != null -> 2                           // 未来截止
-                    task.plannedDates.isNotEmpty() -> 3                  // 有计划日期
-                    else -> 4                                             // 无日期
+                    overdueCheck(task, today, now) -> 0               // 过期最急
+                    task.deadline == today -> 1                      // 今日截止
+                    task.deadline != null -> 2                       // 未来截止
+                    task.plannedDates.isNotEmpty() -> 3              // 有计划日期
+                    else -> 4                                         // 无日期
                 }
             }.thenBy { it.priority.ordinal }
         ).first()
